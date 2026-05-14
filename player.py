@@ -1,9 +1,10 @@
 """
-Raspberry Pi YouTube Playlist Player
-- Fetches config JSON from a GitHub raw URL
+Raspberry Pi YouTube Playlist Media Player
+- Raspberry Pi OS Lite (64-bit), no desktop required
+- Fetches config JSON from GitHub
 - Plays each playlist in order using yt-dlp + mpv
-- Retries failed videos up to MAX_RETRIES times
-- Refreshes config and playlist URLs after every full cycle
+- Fullscreen via DRM (direct to screen, no desktop needed)
+- Retries failed videos, refreshes playlist after every cycle
 """
 
 import json
@@ -18,9 +19,9 @@ from dataclasses import dataclass, field
 
 CONFIG_URL = "https://raw.githubusercontent.com/BARKcommunications/marthakal_media_player/main/playlists.json"
 
-MAX_RETRIES = 3          # How many times to retry a failed video
-RETRY_DELAY = 5          # Seconds to wait between retries
-CONFIG_FETCH_RETRIES = 5 # How many times to retry fetching the config on startup
+MAX_RETRIES = 3
+RETRY_DELAY = 5
+CONFIG_FETCH_RETRIES = 5
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -35,11 +36,11 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ─── Startup check ────────────────────────────────────────────────────────────
+# ─── Platform check ───────────────────────────────────────────────────────────
 
 if sys.platform == "win32":
-    log.error("This script is designed to run on Raspberry Pi (Linux) only.")
-    log.error("Use it on the Pi after testing your playlists.json on Windows.")
+    log.error("This script runs on Raspberry Pi (Linux) only.")
+    log.error("Edit playlists.json on GitHub to change what plays.")
     sys.exit(1)
 
 # ─── Data classes ─────────────────────────────────────────────────────────────
@@ -49,7 +50,6 @@ class Config:
     playlists: list[str] = field(default_factory=list)
     shuffle: bool = False
     refresh_interval_hours: float = 6.0
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,18 +94,20 @@ def get_video_urls(playlist_url: str) -> list[str]:
         log.warning("yt-dlp timed out fetching playlist.")
         return []
     except FileNotFoundError:
-        log.error("yt-dlp not found. Install it with: pip install yt-dlp")
+        log.error("yt-dlp not found. Run setup.sh to install.")
         sys.exit(1)
 
 
 def play_video(url: str) -> bool:
     """
-    Play a single video with mpv.
-    Returns True if playback succeeded, False otherwise.
+    Play a single video fullscreen using mpv with DRM output.
+    DRM renders directly to the screen without needing a desktop.
     """
     cmd = [
         "mpv",
-        "--keep-open=no",
+        "--vo=drm",              # output directly to screen, no desktop needed
+        "--fullscreen",
+        "--keep-open=no",        # close automatically when video ends
         "--really-quiet",
         "--ytdl-format=bestvideo[height<=1080]+bestaudio/best",
         url,
@@ -121,12 +123,12 @@ def play_video(url: str) -> bool:
         log.warning("Video hit 2-hour timeout, skipping.")
         return False
     except FileNotFoundError:
-        log.error("mpv not found. Install it with: sudo apt install mpv")
+        log.error("mpv not found. Run: sudo apt install mpv")
         sys.exit(1)
 
 
 def play_with_retry(url: str, max_retries: int = MAX_RETRIES) -> None:
-    """Try to play a video, retrying up to max_retries times on failure."""
+    """Try to play a video, retrying on failure."""
     for attempt in range(1, max_retries + 1):
         success = play_video(url)
         if success:
@@ -149,7 +151,6 @@ def run() -> None:
             time.sleep(60)
             continue
 
-        # Build the full video queue: each playlist in order
         all_videos: list[tuple[str, str]] = []
         for playlist_url in cfg.playlists:
             urls = get_video_urls(playlist_url)
