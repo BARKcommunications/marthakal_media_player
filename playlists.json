@@ -1,0 +1,8 @@
+{
+  "playlists": [
+    "https://www.youtube.com/playlist?list=YOUR_FIRST_PLAYLIST_ID",
+    "https://www.youtube.com/playlist?list=YOUR_SECOND_PLAYLIST_ID"
+  ],
+  "shuffle": false,
+  "refresh_interval_hours": 6
+}
