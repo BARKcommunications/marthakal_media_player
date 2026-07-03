@@ -1,26 +1,8 @@
 {
   "max_height": 720,
-  "schedule": [
-    {
-      "name": "Weekday mornings",
-      "days": ["mon", "tue", "wed", "thu", "fri"],
-      "start": "09:00",
-      "end": "12:00",
-      "items": [
-        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
-      ]
-    },
-    {
-      "name": "Weekend all day",
-      "days": ["sat", "sun"],
-      "start": "00:00",
-      "end": "23:59",
-      "items": [
-        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
-      ]
-    }
-  ],
+  "schedule": [],
   "default": [
+    "https://youtube.com/playlist?list=PLIQvt8492DS0&si=ifegFSorSYEdSAe2",
     "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
   ]
 }
