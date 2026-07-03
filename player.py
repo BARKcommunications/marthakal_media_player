@@ -1,27 +1,30 @@
 """
-Raspberry Pi YouTube Playlist Media Player
-- Raspberry Pi OS Lite (64-bit), no desktop required
-- Fetches config JSON from GitHub
-- Plays each playlist in order using yt-dlp + mpv
-- Fullscreen via DRM (direct to screen, no desktop needed)
-- Retries failed videos, refreshes playlist after every cycle
+Marthakal Media Player — Raspberry Pi YouTube Playlist Player
+- Reads a local playlists.json (kept up to date via git auto-update)
+- Schedule-aware: plays different content by day of week + time of day
+- Falls back to a default playlist when nothing is scheduled
+- Multiple items per slot play in order, then loop
+- Fullscreen via DRM (no desktop needed) using yt-dlp + mpv
 """
 
+import datetime
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
-import urllib.request
-from dataclasses import dataclass, field
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-CONFIG_URL = "https://raw.githubusercontent.com/BARKcommunications/marthakal_media_player/main/playlists.json"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(SCRIPT_DIR, "playlists.json")
 
-MAX_RETRIES = 3
-RETRY_DELAY = 5
-CONFIG_FETCH_RETRIES = 5
+MAX_RETRIES = 3          # How many times to retry a failed video
+RETRY_DELAY = 5          # Seconds between retries
+EMPTY_WAIT = 30          # Seconds to wait when there's nothing to play
+
+DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -31,7 +34,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("player.log", encoding="utf-8"),
+        logging.FileHandler(os.path.join(SCRIPT_DIR, "player.log"), encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
@@ -40,50 +43,88 @@ log = logging.getLogger(__name__)
 
 if sys.platform == "win32":
     log.error("This script runs on Raspberry Pi (Linux) only.")
-    log.error("Edit playlists.json on GitHub to change what plays.")
+    log.error("Use scheduler.html to build playlists.json, then push to GitHub.")
     sys.exit(1)
 
-# ─── Data classes ─────────────────────────────────────────────────────────────
+# ─── Config loading ───────────────────────────────────────────────────────────
 
-@dataclass
-class Config:
-    playlists: list[str] = field(default_factory=list)
-    shuffle: bool = False
-    refresh_interval_hours: float = 6.0
+_last_good_config = None
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def fetch_config(url: str, retries: int = CONFIG_FETCH_RETRIES) -> Config:
-    """Download and parse the JSON config from GitHub."""
-    for attempt in range(1, retries + 1):
-        try:
-            log.info(f"Fetching config (attempt {attempt}/{retries}): {url}")
-            with urllib.request.urlopen(url, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-            cfg = Config(
-                playlists=data.get("playlists", []),
-                shuffle=data.get("shuffle", False),
-                refresh_interval_hours=data.get("refresh_interval_hours", 6.0),
-            )
-            log.info(f"Config loaded — {len(cfg.playlists)} playlist(s), shuffle={cfg.shuffle}")
-            return cfg
-        except Exception as exc:
-            log.warning(f"Config fetch failed: {exc}")
-            if attempt < retries:
-                time.sleep(RETRY_DELAY)
-    log.error("Could not fetch config after all retries. Exiting.")
-    sys.exit(1)
+def load_config():
+    """
+    Read playlists.json from disk. Returns the parsed dict.
+    Falls back to the last good config if the file is temporarily invalid
+    (e.g. mid git-pull), so a bad commit never takes the screen down.
+    """
+    global _last_good_config
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        _last_good_config = cfg
+        return cfg
+    except Exception as exc:
+        if _last_good_config is not None:
+            log.warning(f"Config unreadable ({exc}); using last good config.")
+            return _last_good_config
+        log.error(f"Config unreadable and no previous config to fall back on: {exc}")
+        return {"schedule": [], "default": []}
 
 
-def get_video_urls(playlist_url: str) -> list[str]:
-    """Use yt-dlp to extract all video URLs from a playlist (no download)."""
+# ─── Schedule resolution ──────────────────────────────────────────────────────
+
+def _parse_hhmm(s: str) -> int:
+    """'09:30' -> minutes since midnight (570)."""
+    try:
+        h, m = s.split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return 0
+
+
+def _block_active(block: dict, now: datetime.datetime) -> bool:
+    """Is this schedule block active at `now`?"""
+    day = DAY_KEYS[now.weekday()]
+    if day not in block.get("days", []):
+        return False
+    mins = now.hour * 60 + now.minute
+    start = _parse_hhmm(block.get("start", "00:00"))
+    end = _parse_hhmm(block.get("end", "23:59"))
+    if start <= end:
+        return start <= mins < end
+    # Range wraps past midnight (e.g. 22:00–02:00)
+    return mins >= start or mins < end
+
+
+def resolve_active_source(cfg: dict, now: datetime.datetime):
+    """
+    Decide what should be playing right now.
+    Returns (source_id, items_list).
+    - Checks schedule blocks in order; first match wins.
+    - Falls back to 'default' if no block matches.
+    Supports the old {"playlists": [...]} schema as default-only.
+    """
+    schedule = cfg.get("schedule", [])
+    for i, block in enumerate(schedule):
+        if _block_active(block, now):
+            name = block.get("name", f"block-{i}")
+            return (f"schedule:{i}:{name}", block.get("items", []))
+
+    # Fallbacks
+    if "default" in cfg:
+        return ("default", cfg.get("default", []))
+    if "playlists" in cfg:  # backward compatibility with old schema
+        return ("default", cfg.get("playlists", []))
+    return ("default", [])
+
+
+# ─── yt-dlp / mpv ─────────────────────────────────────────────────────────────
+
+def get_video_urls(playlist_url: str) -> list:
+    """Expand a playlist URL into a list of video URLs (no download)."""
     log.info(f"Fetching video list from: {playlist_url}")
     cmd = [
-        "yt-dlp",
-        "--flat-playlist",
-        "--print", "url",
-        "--no-warnings",
-        playlist_url,
+        "yt-dlp", "--flat-playlist", "--print", "url",
+        "--no-warnings", playlist_url,
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -98,16 +139,27 @@ def get_video_urls(playlist_url: str) -> list[str]:
         sys.exit(1)
 
 
+def expand_items(items: list) -> list:
+    """
+    Turn a list of items (playlist URLs and/or single video URLs)
+    into a flat list of playable video URLs, in order.
+    """
+    videos = []
+    for item in items:
+        if "list=" in item:
+            videos.extend(get_video_urls(item))
+        elif item.strip():
+            videos.append(item.strip())
+    return videos
+
+
 def play_video(url: str) -> bool:
-    """
-    Play a single video fullscreen using mpv with DRM output.
-    DRM renders directly to the screen without needing a desktop.
-    """
+    """Play a single video fullscreen via DRM. True on success."""
     cmd = [
         "mpv",
-        "--vo=drm",              # output directly to screen, no desktop needed
+        "--vo=drm",
         "--fullscreen",
-        "--keep-open=no",        # close automatically when video ends
+        "--keep-open=no",
         "--really-quiet",
         "--ytdl-format=bestvideo[height<=1080]+bestaudio/best",
         url,
@@ -128,10 +180,9 @@ def play_video(url: str) -> bool:
 
 
 def play_with_retry(url: str, max_retries: int = MAX_RETRIES) -> None:
-    """Try to play a video, retrying on failure."""
+    """Play a video, retrying on failure before giving up."""
     for attempt in range(1, max_retries + 1):
-        success = play_video(url)
-        if success:
+        if play_video(url):
             return
         if attempt < max_retries:
             log.warning(f"Retry {attempt}/{max_retries - 1} in {RETRY_DELAY}s...")
@@ -143,35 +194,32 @@ def play_with_retry(url: str, max_retries: int = MAX_RETRIES) -> None:
 # ─── Main loop ────────────────────────────────────────────────────────────────
 
 def run() -> None:
+    log.info("Marthakal Media Player starting up.")
+    current_source = None
+    queue = []
+    index = 0
+
     while True:
-        cfg = fetch_config(CONFIG_URL)
+        cfg = load_config()
+        source_id, items = resolve_active_source(cfg, datetime.datetime.now())
 
-        if not cfg.playlists:
-            log.warning("No playlists in config. Waiting 60s before retrying...")
-            time.sleep(60)
-            continue
+        # (Re)build the queue when the active source changes or the queue runs out.
+        if source_id != current_source or index >= len(queue):
+            if source_id != current_source:
+                log.info(f"\n── Now playing source: {source_id} ──")
+            queue = expand_items(items)
+            index = 0
+            current_source = source_id
 
-        all_videos: list[tuple[str, str]] = []
-        for playlist_url in cfg.playlists:
-            urls = get_video_urls(playlist_url)
-            for video_url in urls:
-                all_videos.append((playlist_url, video_url))
+            if not queue:
+                log.warning(f"Nothing to play for '{source_id}'. Waiting {EMPTY_WAIT}s...")
+                time.sleep(EMPTY_WAIT)
+                current_source = None  # force a fresh check next loop
+                continue
 
-        if not all_videos:
-            log.warning("No videos found across all playlists. Retrying in 60s...")
-            time.sleep(60)
-            continue
-
-        log.info(f"Starting playback — {len(all_videos)} video(s) across {len(cfg.playlists)} playlist(s)")
-
-        current_playlist = None
-        for playlist_url, video_url in all_videos:
-            if playlist_url != current_playlist:
-                log.info(f"\n── Playlist: {playlist_url} ──")
-                current_playlist = playlist_url
-            play_with_retry(video_url)
-
-        log.info("All playlists finished. Refreshing config and starting again...")
+        video = queue[index]
+        play_with_retry(video)
+        index += 1
 
 
 if __name__ == "__main__":

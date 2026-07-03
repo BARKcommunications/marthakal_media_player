@@ -1,8 +1,7 @@
 {
-  "playlists": [
-    "https://www.youtube.com/playlist?list=YOUR_FIRST_PLAYLIST_ID",
-    "https://www.youtube.com/playlist?list=YOUR_SECOND_PLAYLIST_ID"
-  ],
-  "shuffle": false,
-  "refresh_interval_hours": 6
+  "schedule": [],
+  "default": [
+    "https://youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4&si=Abhz_zg_Zt0-nUEI",
+    "https://youtube.com/playlist?list=PLIQvt8492DS0&si=ifegFSorSYEdSAe2"
+  ]
 }
