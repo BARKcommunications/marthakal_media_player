@@ -2,14 +2,18 @@
 # ─────────────────────────────────────────────────────────────
 #  Marthakal Media Player — Raspberry Pi One-Click Setup
 #  Designed for Raspberry Pi OS Lite (64-bit)
+#  Auto-detects the current user — works with any username.
 #  Run with:
 #  curl -sSL https://raw.githubusercontent.com/BARKcommunications/marthakal_media_player/main/setup.sh | bash
 # ─────────────────────────────────────────────────────────────
 
 set -e
 
+# Auto-detect the current user and their home directory
+CURRENT_USER="$(whoami)"
+INSTALL_DIR="$HOME"
+
 REPO_RAW="https://raw.githubusercontent.com/BARKcommunications/marthakal_media_player/main"
-INSTALL_DIR="/home/pi"
 SERVICE_NAME="mediaplayer"
 PLAYER_FILE="$INSTALL_DIR/player.py"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
@@ -28,10 +32,11 @@ section() { echo -e "\n${YELLOW}── $1 ──${NC}"; }
 section "Checking environment"
 
 if [ "$EUID" -eq 0 ]; then
-  error "Please run as the 'pi' user without sudo."
+  error "Please run as your normal user without sudo (e.g. just: bash setup.sh)."
 fi
 
-info "Environment OK"
+info "Running as user: $CURRENT_USER"
+info "Install directory: $INSTALL_DIR"
 
 # ── System packages ───────────────────────────────────────────
 section "Installing system packages"
@@ -59,10 +64,10 @@ sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
 sudo tee /etc/systemd/system/getty@tty1.service.d/autologin.conf > /dev/null <<AUTOLOGIN
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin pi --noclear %I \$TERM
+ExecStart=-/sbin/agetty --autologin $CURRENT_USER --noclear %I \$TERM
 AUTOLOGIN
 
-info "Auto-login configured"
+info "Auto-login configured for user: $CURRENT_USER"
 
 # ── Download player.py ────────────────────────────────────────
 section "Downloading player.py"
@@ -85,7 +90,7 @@ ExecStart=/usr/bin/python3 $PLAYER_FILE
 WorkingDirectory=$INSTALL_DIR
 Restart=always
 RestartSec=15
-User=pi
+User=$CURRENT_USER
 StandardInput=tty
 TTYPath=/dev/tty1
 TTYReset=yes
