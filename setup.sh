@@ -66,23 +66,22 @@ chmod +x "$UPDATE_SCRIPT" 2>/dev/null || true
 # Allow root (the update timer runs as root) to use the repo without warnings
 sudo git config --system --add safe.directory "$REPO_DIR" || true
 
-# ── Auto-login on boot ────────────────────────────────────────
-section "Configuring auto-login"
-sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
-sudo tee /etc/systemd/system/getty@tty1.service.d/autologin.conf > /dev/null <<AUTOLOGIN
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $CURRENT_USER --noclear %I \$TERM
-AUTOLOGIN
-info "Auto-login configured for user: $CURRENT_USER"
+# ── Free up tty1 for the player ───────────────────────────────
+# The player takes over /dev/tty1 directly for fullscreen DRM output,
+# so the login shell must not hold that console (otherwise they fight
+# over it and the player is killed with SIGHUP on start).
+section "Freeing up the console for video"
+sudo systemctl disable getty@tty1.service > /dev/null 2>&1 || true
+info "Console tty1 reserved for the player"
 
 # ── Player service ────────────────────────────────────────────
 section "Setting up the player service"
 sudo tee "$SERVICE_FILE" > /dev/null <<SERVICE
 [Unit]
 Description=Marthakal YouTube Playlist Media Player
-After=network-online.target
+After=network-online.target getty@tty1.service
 Wants=network-online.target
+Conflicts=getty@tty1.service
 
 [Service]
 ExecStart=/usr/bin/python3 $PLAYER_FILE
@@ -90,10 +89,10 @@ WorkingDirectory=$REPO_DIR
 Restart=always
 RestartSec=15
 User=$CURRENT_USER
-StandardInput=tty
 TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
+StandardInput=tty-force
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
