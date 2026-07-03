@@ -24,6 +24,13 @@ MAX_RETRIES = 3          # How many times to retry a failed video
 RETRY_DELAY = 5          # Seconds between retries
 EMPTY_WAIT = 30          # Seconds to wait when there's nothing to play
 
+# Max video height (resolution). The Pi 4 hardware-decodes H.264 but NOT VP9,
+# so we cap the height and prefer H.264 to keep playback smooth. Lower this
+# (e.g. 480) if a display still stutters. Can be overridden per-config with
+# "max_height" in playlists.json.
+DEFAULT_MAX_HEIGHT = 720
+MAX_HEIGHT = DEFAULT_MAX_HEIGHT  # updated from config at runtime
+
 DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -153,18 +160,35 @@ def expand_items(items: list) -> list:
     return videos
 
 
+def ytdl_format(max_h: int) -> str:
+    """
+    Build a yt-dlp format string that keeps playback smooth on a Pi 4:
+    1. Prefer H.264 video (avc1) + AAC audio — both hardware-decodable.
+    2. Fall back to any codec at the height cap if H.264 isn't offered.
+    3. Fall back to a single best file, then absolute best, as a last resort.
+    """
+    return (
+        f"bestvideo[height<={max_h}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
+        f"bestvideo[height<={max_h}]+bestaudio/"
+        f"best[height<={max_h}]/best"
+    )
+
+
 def play_video(url: str) -> bool:
     """Play a single video fullscreen via DRM. True on success."""
     cmd = [
         "mpv",
         "--vo=drm",
+        "--hwdec=auto-safe",     # use hardware decoding when it's known-safe
         "--fullscreen",
         "--keep-open=no",
         "--really-quiet",
-        "--ytdl-format=bestvideo[height<=1080]+bestaudio/best",
+        "--cache=yes",           # buffer ahead to smooth out network jitter
+        "--cache-secs=20",
+        f"--ytdl-format={ytdl_format(MAX_HEIGHT)}",
         url,
     ]
-    log.info(f"Playing: {url}")
+    log.info(f"Playing (max {MAX_HEIGHT}p): {url}")
     try:
         result = subprocess.run(cmd, timeout=7200)
         if result.returncode == 0:
@@ -201,6 +225,14 @@ def run() -> None:
 
     while True:
         cfg = load_config()
+
+        # Apply the quality cap from config (falls back to the default).
+        global MAX_HEIGHT
+        try:
+            MAX_HEIGHT = int(cfg.get("max_height", DEFAULT_MAX_HEIGHT))
+        except (ValueError, TypeError):
+            MAX_HEIGHT = DEFAULT_MAX_HEIGHT
+
         source_id, items = resolve_active_source(cfg, datetime.datetime.now())
 
         # (Re)build the queue when the active source changes or the queue runs out.

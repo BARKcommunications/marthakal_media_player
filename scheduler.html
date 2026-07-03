@@ -285,6 +285,14 @@
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   input[type="file"] { display: none; }
+
+  .quality-field { display: flex; align-items: center; gap: 8px; }
+  #quality {
+    font-family: var(--mono); font-size: 13px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; cursor: pointer; color-scheme: dark;
+  }
+  #quality:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .footnote {
     max-width: 1400px; margin: 0 auto; padding: 0 28px 40px;
     color: var(--faint); font-size: 12.5px;
@@ -302,6 +310,15 @@
       <h1>Marthakal Scheduler</h1>
       <span class="sub">playlists.json builder</span>
     </div>
+    <label class="quality-field">
+      <span class="field-label">Max quality</span>
+      <select id="quality">
+        <option value="1080">1080p</option>
+        <option value="720" selected>720p</option>
+        <option value="480">480p</option>
+        <option value="360">360p</option>
+      </select>
+    </label>
     <button class="ghost" id="importBtn">Import existing</button>
     <button class="primary" id="exportBtn">Export playlists.json</button>
     <input type="file" id="fileInput" accept="application/json,.json">
@@ -352,6 +369,7 @@
 
   // ── State ──────────────────────────────────────────────
   let state = {
+    maxHeight: 720,        // playback quality cap
     schedule: [],          // { name, days:[], start, end, items:[] }
     default: [""],
   };
@@ -564,7 +582,7 @@
   // ── Import / Export ────────────────────────────────────
   function exportJSON() {
     // Clean up: drop empty items, trim
-    const out = { schedule: [], default: [] };
+    const out = { max_height: state.maxHeight, schedule: [], default: [] };
     state.schedule.forEach(b => {
       const items = b.items.map(s=>s.trim()).filter(Boolean);
       out.schedule.push({
@@ -590,6 +608,10 @@
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result);
+        if (data.max_height) {
+          state.maxHeight = parseInt(data.max_height, 10) || 720;
+          $("#quality").value = String(state.maxHeight);
+        }
         state.schedule = [];
         if (Array.isArray(data.schedule)) {
           data.schedule.forEach(b => state.schedule.push({
@@ -636,6 +658,7 @@
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   });
   $("#addDefaultItem").addEventListener("click", () => { state.default.push(""); render(); });
+  $("#quality").addEventListener("change", (e) => { state.maxHeight = parseInt(e.target.value, 10) || 720; });
   $("#exportBtn").addEventListener("click", exportJSON);
   $("#importBtn").addEventListener("click", () => $("#fileInput").click());
   $("#fileInput").addEventListener("change", (e) => {
