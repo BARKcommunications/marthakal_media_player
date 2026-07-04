@@ -43,6 +43,7 @@ sudo apt-get install -y -qq \
   python3 \
   python3-pip \
   curl \
+  unzip \
   libdrm2
 info "Packages installed"
 
@@ -50,6 +51,21 @@ info "Packages installed"
 section "Installing yt-dlp"
 pip3 install --quiet --break-system-packages --upgrade yt-dlp
 info "yt-dlp installed"
+
+# ── Deno (JavaScript runtime for YouTube extraction) ──────────
+# YouTube now requires solving a JS challenge to extract streams. yt-dlp uses
+# the Deno runtime plus a solver script (fetched via --remote-components) to
+# do this. Without Deno, most videos fail to resolve.
+section "Installing Deno (needed for YouTube)"
+if ! command -v deno > /dev/null 2>&1; then
+  curl -fsSL https://deno.land/install.sh | DENO_INSTALL="$HOME/.deno" sh -s -- -y > /dev/null 2>&1 || true
+  sudo ln -sf "$HOME/.deno/bin/deno" /usr/local/bin/deno
+fi
+if command -v deno > /dev/null 2>&1; then
+  info "Deno installed: $(deno --version 2>/dev/null | head -1)"
+else
+  warn "Deno install could not be verified — YouTube extraction may fail."
+fi
 
 # ── Clone (or update) the repo ────────────────────────────────
 section "Fetching the media player from GitHub"
@@ -136,6 +152,7 @@ info "Services enabled"
 section "Verifying installation"
 mpv --version > /dev/null 2>&1 && info "mpv OK"
 yt-dlp --version > /dev/null 2>&1 && info "yt-dlp OK"
+command -v deno > /dev/null 2>&1 && info "Deno OK" || warn "Deno missing (YouTube may fail)"
 python3 --version > /dev/null 2>&1 && info "Python OK"
 [ -f "$PLAYER_FILE" ] && info "player.py OK"
 [ -f "$REPO_DIR/playlists.json" ] && info "playlists.json OK"

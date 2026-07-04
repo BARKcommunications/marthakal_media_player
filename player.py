@@ -33,6 +33,10 @@ MIN_PLAY_OK = 3          # A "video" shorter than this is treated as a failure
 RESOLVE_TIMEOUT = 60     # Seconds allowed for yt-dlp to resolve a stream URL
 VIDEO_TIMEOUT = 7200     # Hard cap per video (2 hours)
 
+# YouTube now requires a JS challenge solver. These args tell yt-dlp to use the
+# EJS solver (fetched from GitHub) with the Deno runtime installed by setup.sh.
+YTDLP_EJS = ["--remote-components", "ejs:github"]
+
 # Quality cap. The Pi 4 hardware-decodes H.264 but NOT VP9, so we prefer H.264
 # and cap the height. Override per-config with "max_height" in playlists.json.
 DEFAULT_MAX_HEIGHT = 720
@@ -118,15 +122,14 @@ def resolve_active_source(cfg: dict, now: datetime.datetime):
 
 def ytdl_format(max_h: int) -> str:
     """
-    Prefer a single progressive H.264 + AAC stream so:
-      - the Pi 4 can hardware-decode it (smooth playback), and
-      - yt-dlp returns ONE direct URL, which we can pre-resolve and hand to
-        mpv for a near-instant start (keeping the splash up during the wait).
-    Falls back to any single stream at the height cap.
+    Prefer H.264 (avc1) video the Pi can hardware-decode, plus a separate audio
+    track (this is what YouTube actually serves now). yt-dlp returns the two
+    stream URLs, which we hand to mpv together. Falls back to a single muxed
+    stream, then anything, so playback still happens if H.264 isn't offered.
     """
     return (
-        f"best[height<={max_h}][vcodec^=avc1][acodec^=mp4a]/"
-        f"best[height<={max_h}][ext=mp4]/"
+        f"bestvideo[height<={max_h}][vcodec^=avc1]+bestaudio/"
+        f"bestvideo[height<={max_h}]+bestaudio/"
         f"best[height<={max_h}]/best"
     )
 
@@ -134,7 +137,7 @@ def ytdl_format(max_h: int) -> str:
 def get_video_urls(playlist_url: str) -> list:
     """Expand a playlist URL into a list of video page URLs (no download)."""
     log.info(f"Fetching video list from: {playlist_url}")
-    cmd = ["yt-dlp", "--flat-playlist", "--print", "url", "--no-warnings", playlist_url]
+    cmd = ["yt-dlp", "--flat-playlist", "--print", "url", "--no-warnings"] + YTDLP_EJS + [playlist_url]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         urls = [line.strip() for line in result.stdout.splitlines() if line.strip()]
@@ -160,15 +163,20 @@ def expand_items(items: list) -> list:
 
 
 def resolve_stream_url(page_url: str):
-    """Resolve a YouTube page URL to a direct stream URL. Returns str or None."""
-    cmd = ["yt-dlp", "-f", ytdl_format(MAX_HEIGHT), "-g", "--no-warnings", page_url]
+    """
+    Resolve a YouTube page URL to direct stream URL(s).
+    yt-dlp -g prints one URL per line: usually two (video, then audio) for
+    separate streams, or one for a muxed stream. Returns a list of 1-2 URLs,
+    or None on failure.
+    """
+    cmd = ["yt-dlp", "-f", ytdl_format(MAX_HEIGHT), "-g", "--no-warnings"] + YTDLP_EJS + [page_url]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=RESOLVE_TIMEOUT)
-        lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        lines = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith("http")]
         if not lines:
             log.warning(f"Could not resolve stream for: {page_url}")
             return None
-        return lines[0]
+        return lines[:2]
     except subprocess.TimeoutExpired:
         log.warning("yt-dlp -g timed out resolving stream.")
         return None
@@ -231,7 +239,11 @@ class MpvIPC:
     def get(self, prop: str):
         return self.command(["get_property", prop]).get("data")
 
-    def loadfile(self, path: str):
+    def loadfile(self, path: str, audio_url: str = None):
+        # Attach (or clear) a separate audio track via the audio-files property
+        # before loading. This works across mpv versions and avoids the
+        # version-specific loadfile option syntax and URL-escaping pitfalls.
+        self.command(["set_property", "audio-files", [audio_url] if audio_url else []])
         return self.command(["loadfile", path, "replace"])
 
     def close(self):
@@ -299,12 +311,14 @@ def wait_until_idle(mpv: MpvIPC, timeout: float = VIDEO_TIMEOUT) -> float:
 
 def play_video(mpv: MpvIPC, page_url: str) -> bool:
     """Resolve, then play a single video on the persistent mpv. True on success."""
-    direct = resolve_stream_url(page_url)   # splash stays up during this wait
-    if not direct:
+    urls = resolve_stream_url(page_url)     # splash stays up during this wait
+    if not urls:
         return False
+    video_url = urls[0]
+    audio_url = urls[1] if len(urls) > 1 else None
     log.info(f"Playing (max {MAX_HEIGHT}p): {page_url}")
     try:
-        mpv.loadfile(direct)
+        mpv.loadfile(video_url, audio_url)
     except Exception as exc:
         log.warning(f"mpv loadfile failed: {exc}")
         return False
