@@ -42,6 +42,12 @@ YTDLP_EJS = ["--remote-components", "ejs:github"]
 DEFAULT_MAX_HEIGHT = 720
 MAX_HEIGHT = DEFAULT_MAX_HEIGHT
 
+# Which audio output mpv uses. The Pi 4 has two HDMI ports (vc4hdmi0 nearest
+# the USB-C power, vc4hdmi1 further away) and mpv doesn't always pick the one
+# your screen is on. Set "audio_device" in playlists.json per screen. Empty
+# means let mpv choose. Example: "alsa/hdmi:CARD=vc4hdmi1,DEV=0"
+AUDIO_DEVICE = ""
+
 DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -280,6 +286,9 @@ def start_mpv() -> subprocess.Popen:
         "--cache-secs=20",
         f"--input-ipc-server={MPV_SOCKET}",
     ]
+    if AUDIO_DEVICE:
+        cmd.append(f"--audio-device={AUDIO_DEVICE}")
+        log.info(f"Using audio device: {AUDIO_DEVICE}")
     log.info("Launching mpv (persistent display).")
     return subprocess.Popen(cmd)
 
@@ -345,6 +354,12 @@ def play_with_retry(mpv: MpvIPC, page_url: str, max_retries: int = MAX_RETRIES) 
 
 def run() -> None:
     log.info("Marthakal Media Player starting up.")
+
+    # Read the audio device from config before launching mpv (it's set once,
+    # at mpv launch). Falls back to mpv's default if unset.
+    global AUDIO_DEVICE
+    AUDIO_DEVICE = str(load_config().get("audio_device", "")).strip()
+
     proc = start_mpv()
     mpv = MpvIPC(MPV_SOCKET)
     if not mpv.connect():
