@@ -14,6 +14,7 @@ import datetime
 import json
 import logging
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -41,6 +42,9 @@ YTDLP_EJS = ["--remote-components", "ejs:github"]
 # and cap the height. Override per-config with "max_height" in playlists.json.
 DEFAULT_MAX_HEIGHT = 720
 MAX_HEIGHT = DEFAULT_MAX_HEIGHT
+
+# How long an image is shown if the item doesn't specify its own duration.
+DEFAULT_IMAGE_SECONDS = 10
 
 # Which audio output mpv uses. The Pi 4 has two HDMI ports (vc4hdmi0 nearest
 # the USB-C power, vc4hdmi1 further away) and mpv doesn't always pick the one
@@ -112,16 +116,16 @@ def _block_active(block: dict, now: datetime.datetime) -> bool:
 
 
 def resolve_active_source(cfg: dict, now: datetime.datetime):
-    """Decide what should play now. Returns (source_id, items_list)."""
+    """Decide what should play now. Returns (source_id, items_list, shuffle)."""
     for i, block in enumerate(cfg.get("schedule", [])):
         if _block_active(block, now):
             name = block.get("name", f"block-{i}")
-            return (f"schedule:{i}:{name}", block.get("items", []))
+            return (f"schedule:{i}:{name}", block.get("items", []), bool(block.get("shuffle", False)))
     if "default" in cfg:
-        return ("default", cfg.get("default", []))
+        return ("default", cfg.get("default", []), bool(cfg.get("default_shuffle", False)))
     if "playlists" in cfg:                # backward compatibility
-        return ("default", cfg.get("playlists", []))
-    return ("default", [])
+        return ("default", cfg.get("playlists", []), bool(cfg.get("shuffle", False)))
+    return ("default", [], False)
 
 
 # ─── yt-dlp helpers ───────────────────────────────────────────────────────────
@@ -157,15 +161,46 @@ def get_video_urls(playlist_url: str) -> list:
         sys.exit(1)
 
 
+def _safe_int(val, fallback):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return fallback
+
+
 def expand_items(items: list) -> list:
-    """Flatten playlist URLs + single video URLs into an ordered video list."""
-    videos = []
+    """
+    Flatten config items into an ordered list of playable entries.
+    Each entry is a dict:
+      {"kind": "video", "url": <youtube page url>}
+      {"kind": "image", "src": <repo path or url>, "duration": <seconds>}
+    A config item may be:
+      - a string playlist URL (contains 'list=')  -> expands to many video entries
+      - a string video URL                          -> one video entry
+      - an object {"type": "image", "src": ..., "duration": ...} -> one image entry
+    """
+    entries = []
     for item in items:
-        if "list=" in item:
-            videos.extend(get_video_urls(item))
-        elif item.strip():
-            videos.append(item.strip())
-    return videos
+        if isinstance(item, dict):
+            if item.get("type") == "image":
+                src = str(item.get("src") or item.get("url") or "").strip()
+                if src:
+                    entries.append({
+                        "kind": "image",
+                        "src": src,
+                        "duration": _safe_int(item.get("duration"), DEFAULT_IMAGE_SECONDS),
+                    })
+            continue
+        if isinstance(item, str):
+            s = item.strip()
+            if not s:
+                continue
+            if "list=" in s:
+                for url in get_video_urls(s):
+                    entries.append({"kind": "video", "url": url})
+            else:
+                entries.append({"kind": "video", "url": s})
+    return entries
 
 
 def resolve_stream_url(page_url: str):
@@ -297,6 +332,9 @@ def show_splash(mpv: MpvIPC) -> None:
     """Display the splash image, if one has been added to the repo."""
     if os.path.exists(SPLASH_PATH):
         try:
+            # Reset to infinite so the splash stays until the next loadfile
+            # (a prior image item may have set a finite duration).
+            mpv.command(["set_property", "image-display-duration", "inf"])
             mpv.loadfile(SPLASH_PATH)
         except Exception as exc:
             log.warning(f"Could not show splash: {exc}")
@@ -350,6 +388,34 @@ def play_with_retry(mpv: MpvIPC, page_url: str, max_retries: int = MAX_RETRIES) 
             log.error(f"Giving up on: {page_url}")
 
 
+def play_image(mpv: MpvIPC, entry: dict) -> None:
+    """Show an image (from the repo or a URL) for its duration, then move on."""
+    src = entry["src"]
+    duration = max(1, _safe_int(entry.get("duration"), DEFAULT_IMAGE_SECONDS))
+    # A repo-relative path (images/foo.png) resolves against the script dir;
+    # an http(s) URL is passed straight to mpv.
+    path = src if src.startswith("http") else os.path.join(SCRIPT_DIR, src)
+    if not src.startswith("http") and not os.path.exists(path):
+        log.warning(f"Image not found, skipping: {path}")
+        return
+    log.info(f"Showing image for {duration}s: {src}")
+    try:
+        mpv.command(["set_property", "image-display-duration", duration])
+        mpv.loadfile(path)                       # no audio for images
+        wait_until_idle(mpv, timeout=duration + 30)
+    except Exception as exc:
+        log.warning(f"Image display failed: {exc}")
+    show_splash(mpv)                             # cover the gap before the next one
+
+
+def play_entry(mpv: MpvIPC, entry: dict) -> None:
+    """Dispatch a queue entry to the right player."""
+    if entry.get("kind") == "image":
+        play_image(mpv, entry)
+    else:
+        play_with_retry(mpv, entry["url"])
+
+
 # ─── Main loop ────────────────────────────────────────────────────────────────
 
 def run() -> None:
@@ -382,12 +448,15 @@ def run() -> None:
             except (ValueError, TypeError):
                 MAX_HEIGHT = DEFAULT_MAX_HEIGHT
 
-            source_id, items = resolve_active_source(cfg, datetime.datetime.now())
+            source_id, items, shuffle = resolve_active_source(cfg, datetime.datetime.now())
 
             if source_id != current_source or index >= len(queue):
                 if source_id != current_source:
                     log.info(f"── Now playing source: {source_id} ──")
                 queue = expand_items(items)
+                if shuffle:
+                    random.shuffle(queue)          # fresh random order each cycle
+                    log.info(f"Shuffled {len(queue)} item(s).")
                 index = 0
                 current_source = source_id
                 if not queue:
@@ -397,7 +466,7 @@ def run() -> None:
                     current_source = None
                     continue
 
-            play_with_retry(mpv, queue[index])
+            play_entry(mpv, queue[index])
             index += 1
     except ConnectionError as exc:
         log.error(f"Lost connection to mpv ({exc}). Exiting so systemd restarts.")
