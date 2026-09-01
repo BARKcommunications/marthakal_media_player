@@ -4,20 +4,35 @@
   "schedule": [
     {
       "name": "Weekday mornings",
-      "days": ["mon", "tue", "wed", "thu", "fri"],
-      "start": "09:00",
-      "end": "12:00",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "start": "08:00",
+      "end": "17:00",
       "items": [
-        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
+        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4",
+        "https://www.youtube.com/watch?v=VLQU7zclO8g&list=PLIQvt8492DS0",
+        "https://www.youtube.com/watch?v=4NYJS59SDdg&list=PLU2l_e3BJUYE"
       ]
     },
     {
       "name": "Weekend all day",
-      "days": ["sat", "sun"],
-      "start": "00:00",
-      "end": "23:59",
+      "days": [
+        "sat",
+        "sun"
+      ],
+      "start": "08:00",
+      "end": "17:00",
       "items": [
-        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
+        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4",
+        "https://www.youtube.com/watch?v=VLQU7zclO8g&list=PLIQvt8492DS0",
+        "https://www.youtube.com/watch?v=4NYJS59SDdg&list=PLU2l_e3BJUYE"
       ]
     }
   ],
