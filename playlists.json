@@ -1,5 +1,5 @@
 {
-  "max_height": 720,
+  "max_height": 1080,
   "audio_device": "alsa/hdmi:CARD=vc4hdmi0,DEV=0",
   "schedule": [
     {
