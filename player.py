@@ -31,7 +31,6 @@ MAX_RETRIES = 3          # How many times to retry a failed video
 RETRY_DELAY = 5          # Seconds between retries
 EMPTY_WAIT = 30          # Seconds to wait when there's nothing to play
 MIN_PLAY_OK = 3          # A "video" shorter than this is treated as a failure
-RESOLVE_TIMEOUT = 60     # Seconds allowed for yt-dlp to resolve a stream URL
 VIDEO_TIMEOUT = 7200     # Hard cap per video (2 hours)
 
 # YouTube now requires a JS challenge solver. These args tell yt-dlp to use the
@@ -203,29 +202,6 @@ def expand_items(items: list) -> list:
     return entries
 
 
-def resolve_stream_url(page_url: str):
-    """
-    Resolve a YouTube page URL to direct stream URL(s).
-    yt-dlp -g prints one URL per line: usually two (video, then audio) for
-    separate streams, or one for a muxed stream. Returns a list of 1-2 URLs,
-    or None on failure.
-    """
-    cmd = ["yt-dlp", "-f", ytdl_format(MAX_HEIGHT), "-g", "--no-warnings"] + YTDLP_EJS + [page_url]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=RESOLVE_TIMEOUT)
-        lines = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith("http")]
-        if not lines:
-            log.warning(f"Could not resolve stream for: {page_url}")
-            return None
-        return lines[:2]
-    except subprocess.TimeoutExpired:
-        log.warning("yt-dlp -g timed out resolving stream.")
-        return None
-    except FileNotFoundError:
-        log.error("yt-dlp not found. Run setup.sh to install.")
-        sys.exit(1)
-
-
 # ─── mpv IPC control ──────────────────────────────────────────────────────────
 
 class MpvIPC:
@@ -280,11 +256,7 @@ class MpvIPC:
     def get(self, prop: str):
         return self.command(["get_property", prop]).get("data")
 
-    def loadfile(self, path: str, audio_url: str = None):
-        # Attach (or clear) a separate audio track via the audio-files property
-        # before loading. This works across mpv versions and avoids the
-        # version-specific loadfile option syntax and URL-escaping pitfalls.
-        self.command(["set_property", "audio-files", [audio_url] if audio_url else []])
+    def loadfile(self, path: str):
         return self.command(["loadfile", path, "replace"])
 
     def close(self):
@@ -319,6 +291,10 @@ def start_mpv() -> subprocess.Popen:
         "--image-display-duration=inf",     # splash image stays until replaced
         "--cache=yes",
         "--cache-secs=20",
+        # Let mpv's built-in yt-dlp resolve YouTube itself, so the fetch and
+        # playback share one client context (no 403s from client-locked URLs).
+        f"--ytdl-format={ytdl_format(MAX_HEIGHT)}",
+        "--ytdl-raw-options=remote-components=ejs:github",
         f"--input-ipc-server={MPV_SOCKET}",
     ]
     if AUDIO_DEVICE:
@@ -357,15 +333,14 @@ def wait_until_idle(mpv: MpvIPC, timeout: float = VIDEO_TIMEOUT) -> float:
 # ─── Playback ─────────────────────────────────────────────────────────────────
 
 def play_video(mpv: MpvIPC, page_url: str) -> bool:
-    """Resolve, then play a single video on the persistent mpv. True on success."""
-    urls = resolve_stream_url(page_url)     # splash stays up during this wait
-    if not urls:
-        return False
-    video_url = urls[0]
-    audio_url = urls[1] if len(urls) > 1 else None
+    """
+    Play a video by handing the YouTube page URL to mpv, which resolves and
+    plays it with its own yt-dlp hook. Because the fetch and playback share one
+    client context, YouTube doesn't reject the stream (no 403s). True on success.
+    """
     log.info(f"Playing (max {MAX_HEIGHT}p): {page_url}")
     try:
-        mpv.loadfile(video_url, audio_url)
+        mpv.loadfile(page_url)
     except Exception as exc:
         log.warning(f"mpv loadfile failed: {exc}")
         return False
@@ -421,10 +396,16 @@ def play_entry(mpv: MpvIPC, entry: dict) -> None:
 def run() -> None:
     log.info("Marthakal Media Player starting up.")
 
-    # Read the audio device from config before launching mpv (it's set once,
-    # at mpv launch). Falls back to mpv's default if unset.
-    global AUDIO_DEVICE
-    AUDIO_DEVICE = str(load_config().get("audio_device", "")).strip()
+    # Read audio device and quality from config before launching mpv — both are
+    # baked into the mpv launch (audio output + the yt-dlp format string). A
+    # config change triggers a git pull + service restart, so this re-reads them.
+    global AUDIO_DEVICE, MAX_HEIGHT
+    _startcfg = load_config()
+    AUDIO_DEVICE = str(_startcfg.get("audio_device", "")).strip()
+    try:
+        MAX_HEIGHT = int(_startcfg.get("max_height", DEFAULT_MAX_HEIGHT))
+    except (ValueError, TypeError):
+        MAX_HEIGHT = DEFAULT_MAX_HEIGHT
 
     proc = start_mpv()
     mpv = MpvIPC(MPV_SOCKET)
@@ -441,13 +422,6 @@ def run() -> None:
     try:
         while True:
             cfg = load_config()
-
-            global MAX_HEIGHT
-            try:
-                MAX_HEIGHT = int(cfg.get("max_height", DEFAULT_MAX_HEIGHT))
-            except (ValueError, TypeError):
-                MAX_HEIGHT = DEFAULT_MAX_HEIGHT
-
             source_id, items, shuffle = resolve_active_source(cfg, datetime.datetime.now())
 
             if source_id != current_source or index >= len(queue):
