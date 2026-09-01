@@ -9,9 +9,7 @@
         "tue",
         "wed",
         "thu",
-        "fri",
-        "sat",
-        "sun"
+        "fri"
       ],
       "start": "08:00",
       "end": "17:00",
@@ -19,7 +17,8 @@
         "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4",
         "https://youtube.com/playlist?list=PLIQvt8492DS0&si=a_UB64r859iip5Ap",
         "https://youtube.com/playlist?list=PLU2l_e3BJUYE&si=A6bc7MfUszCU4bQL"
-      ]
+      ],
+      "shuffle": true
     },
     {
       "name": "Weekend all day",
@@ -33,10 +32,12 @@
         "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4",
         "https://youtube.com/playlist?list=PLIQvt8492DS0&si=a_UB64r859iip5Ap",
         "https://youtube.com/playlist?list=PLU2l_e3BJUYE&si=A6bc7MfUszCU4bQL"
-      ]
+      ],
+      "shuffle": true
     }
   ],
   "default": [
     "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
-  ]
+  ],
+  "default_shuffle": true
 }
