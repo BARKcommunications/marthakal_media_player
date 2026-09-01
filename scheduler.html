@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Marthakal Media — Scheduler</title>
+<style>
+  :root {
+    --bg:        #12141c;
+    --panel:     #1b1e2a;
+    --panel-2:   #22273544;
+    --line:      #2c3142;
+    --line-soft: #232835;
+    --text:      #e9ebf2;
+    --muted:     #8990a6;
+    --faint:     #5b6178;
+    --amber:     #f5a623;
+    --amber-dim: #f5a62322;
+    --on-air:    #ff4d4d;
+    --focus:     #6ea8ff;
+    --radius:    10px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+    /* block colours, assigned by index */
+    --b0:#f5a623; --b1:#3ec8c8; --b2:#a78bfa; --b3:#f472b6; --b4:#4ade80; --b5:#60a5fa;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--amber); color: #12141c; }
+
+  a { color: var(--amber); }
+
+  /* ── Top bar ─────────────────────────────────────────── */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 20px;
+    padding: 16px 28px;
+    background: rgba(18,20,28,0.86);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: baseline; gap: 12px; margin-right: auto; }
+  .on-air-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--on-air);
+    box-shadow: 0 0 0 0 rgba(255,77,77,0.6);
+    animation: pulse 2.4s infinite;
+    align-self: center;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,77,77,0.5); }
+    70%  { box-shadow: 0 0 0 7px rgba(255,77,77,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,77,77,0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .on-air-dot { animation: none; }
+  }
+  .brand h1 {
+    font-size: 17px; font-weight: 650; letter-spacing: -0.01em; margin: 0;
+  }
+  .brand .sub {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.16em;
+  }
+
+  button {
+    font-family: var(--sans); font-size: 14px; font-weight: 550;
+    color: var(--text); background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 9px 15px; border-radius: 8px; cursor: pointer;
+    transition: border-color .12s ease, background .12s ease, transform .04s ease;
+  }
+  button:hover { border-color: var(--faint); background: #232838; }
+  button:active { transform: translateY(1px); }
+  button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  button.primary {
+    background: var(--amber); color: #12141c; border-color: var(--amber);
+    font-weight: 650;
+  }
+  button.primary:hover { background: #ffb840; border-color: #ffb840; }
+  button.ghost { background: transparent; }
+  button.tiny { padding: 4px 9px; font-size: 12px; }
+  button.danger:hover { border-color: var(--on-air); color: #ffb4b4; }
+
+  /* ── Layout ──────────────────────────────────────────── */
+  .wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 28px;
+    padding: 28px;
+    max-width: 1400px; margin: 0 auto;
+    align-items: start;
+  }
+  @media (max-width: 1040px) {
+    .wrap { grid-template-columns: 1fr; }
+    .preview-col { position: static !important; }
+  }
+
+  section.editor { min-width: 0; }
+
+  .section-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--muted);
+    display: flex; align-items: center; gap: 10px; margin: 0 0 14px;
+  }
+  .section-label::after {
+    content: ""; flex: 1; height: 1px; background: var(--line-soft);
+  }
+
+  /* ── Block cards ─────────────────────────────────────── */
+  .block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent, var(--amber));
+    border-radius: var(--radius);
+    padding: 16px 16px 14px;
+    margin-bottom: 14px;
+  }
+  .block-head {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+  }
+  .block-index {
+    font-family: var(--mono); font-size: 12px; color: var(--accent, var(--amber));
+    font-weight: 600; min-width: 22px;
+  }
+  input[type="text"], input[type="time"] {
+    font-family: var(--sans); font-size: 14px; color: var(--text);
+    background: #14171f; border: 1px solid var(--line);
+    border-radius: 7px; padding: 8px 10px;
+  }
+  input[type="text"]:focus, input[type="time"]:focus {
+    outline: none; border-color: var(--focus);
+  }
+  input.block-name { flex: 1; font-weight: 550; }
+  input[type="time"] { font-family: var(--mono); color-scheme: dark; }
+
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .row + .row { margin-top: 12px; }
+  .field-label {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--faint); margin-right: 2px;
+  }
+  .time-sep { color: var(--faint); }
+  .wrap-note {
+    font-family: var(--mono); font-size: 11px; color: var(--amber);
+    margin-left: 4px;
+  }
+
+  /* ── Day toggles ─────────────────────────────────────── */
+  .days { display: flex; gap: 5px; }
+  .day-btn {
+    width: 34px; height: 32px; padding: 0; font-size: 12px; font-weight: 600;
+    font-family: var(--mono); color: var(--muted);
+    background: #14171f; border: 1px solid var(--line); border-radius: 7px;
+  }
+  .day-btn[aria-pressed="true"] {
+    background: var(--accent, var(--amber)); color: #12141c;
+    border-color: var(--accent, var(--amber));
+  }
+
+  /* ── Item lists ──────────────────────────────────────── */
+  .items { margin-top: 12px; display: flex; flex-direction: column; gap: 7px; }
+  .item {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .item-kind {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 3px 6px; border-radius: 5px;
+    white-space: nowrap; min-width: 60px; text-align: center;
+  }
+  .kind-list { background: #3ec8c822; color: #7fe0e0; }
+  .kind-video { background: #a78bfa22; color: #c4b5fd; }
+  .kind-empty { background: #2c3142; color: var(--faint); }
+  .kind-image { background: #4ade8022; color: #86efac; }
+  .image-item .thumb {
+    width: 40px; height: 26px; object-fit: cover; border-radius: 4px;
+    border: 1px solid var(--line); background: #14171f; flex-shrink: 0;
+  }
+  .image-item .img-name {
+    flex: 1; font-family: var(--mono); font-size: 12px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .image-item .dur {
+    display: flex; align-items: center; gap: 5px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .image-item .dur input {
+    width: 52px; font-family: var(--mono); font-size: 12.5px; color: var(--text);
+    background: #14171f; border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 7px; text-align: right;
+  }
+  .image-item .dur input:focus { outline: none; border-color: var(--focus); }
+  .item input[type="text"] { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+  .item-move { display: flex; flex-direction: column; }
+  .item-move button {
+    padding: 0; width: 22px; height: 15px; line-height: 1; font-size: 9px;
+    border-radius: 4px; background: transparent; color: var(--muted);
+  }
+
+  .block-actions { display: flex; gap: 8px; margin-top: 14px; }
+
+  .add-block {
+    width: 100%; padding: 13px; border-style: dashed; color: var(--muted);
+    background: transparent; font-weight: 550;
+  }
+  .add-block:hover { color: var(--text); border-color: var(--faint); }
+
+  /* ── Default panel ───────────────────────────────────── */
+  .default-panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px; margin-top: 8px;
+  }
+  .default-panel .hint {
+    font-size: 12.5px; color: var(--muted); margin: 0 0 12px;
+  }
+
+  /* ── Week preview grid ───────────────────────────────── */
+  .preview-col { position: sticky; top: 92px; }
+  .preview {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px; overflow: hidden;
+  }
+  .preview h2 {
+    font-size: 13px; font-family: var(--mono); text-transform: uppercase;
+    letter-spacing: 0.16em; color: var(--muted); font-weight: 600;
+    margin: 0 0 14px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 34px repeat(7, 1fr);
+    grid-template-rows: 20px 1fr;
+    gap: 0;
+  }
+  .grid-corner {}
+  .grid-day {
+    text-align: center; font-family: var(--mono); font-size: 11px;
+    color: var(--muted); font-weight: 600; padding-bottom: 6px;
+  }
+  .grid-day.today { color: var(--amber); }
+  .hours { position: relative; }
+  .hour-label {
+    position: absolute; right: 6px; transform: translateY(-50%);
+    font-family: var(--mono); font-size: 9.5px; color: var(--faint);
+  }
+  .col {
+    position: relative; border-left: 1px solid var(--line-soft);
+    height: 336px; /* 24h * 14px */
+  }
+  .col:last-child { border-right: 1px solid var(--line-soft); }
+  .hour-line {
+    position: absolute; left: 0; right: 0; height: 1px;
+    background: var(--line-soft);
+  }
+  .band {
+    position: absolute; left: 2px; right: 2px; border-radius: 4px;
+    background: var(--band, var(--amber)); opacity: 0.9;
+    overflow: hidden; min-height: 3px;
+    border: 1px solid rgba(0,0,0,0.2);
+  }
+  .band span {
+    font-family: var(--mono); font-size: 8.5px; color: rgba(0,0,0,0.75);
+    padding: 1px 3px; display: block; white-space: nowrap; font-weight: 600;
+  }
+  .now-line {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: var(--on-air); z-index: 5;
+  }
+  .now-line::before {
+    content: ""; position: absolute; left: -3px; top: -2px;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--on-air);
+  }
+  .legend {
+    margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px 14px;
+    font-size: 11.5px; color: var(--muted);
+  }
+  .legend .lg { display: flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 10px; height: 10px; border-radius: 3px; }
+
+  .empty-state {
+    color: var(--faint); font-size: 13px; text-align: center;
+    padding: 28px 10px; border: 1px dashed var(--line); border-radius: 8px;
+  }
+
+  /* ── Toast ───────────────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--amber); color: #12141c; font-weight: 600; font-size: 14px;
+    padding: 11px 20px; border-radius: 9px; opacity: 0; pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease; z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  input[type="file"] { display: none; }
+
+  .quality-field { display: flex; align-items: center; gap: 8px; }
+  #quality {
+    font-family: var(--mono); font-size: 13px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; cursor: pointer; color-scheme: dark;
+  }
+  #quality:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .settings-panel {
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .settings-inner { max-width: 1400px; margin: 0 auto; padding: 20px 28px 24px; }
+  .settings-hint { font-size: 12.5px; color: var(--muted); margin: 0 0 14px; max-width: 620px; }
+  .settings-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 20px; max-width: 720px; margin-bottom: 14px;
+  }
+  @media (max-width: 640px) { .settings-grid { grid-template-columns: 1fr; } }
+  .settings-grid label, .remember-row {
+    display: flex; flex-direction: column; gap: 6px;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .settings-grid input {
+    font-family: var(--mono); font-size: 13px; color: var(--text);
+    background: #14171f; border: 1px solid var(--line);
+    border-radius: 7px; padding: 9px 11px; text-transform: none; letter-spacing: 0;
+  }
+  .settings-grid input:focus { outline: none; border-color: var(--focus); }
+  .remember-row {
+    flex-direction: row; align-items: center; gap: 9px; text-transform: none;
+    letter-spacing: 0; font-family: var(--sans); font-size: 13px; color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .remember-row input { width: 16px; height: 16px; accent-color: var(--amber); }
+  button.busy { opacity: 0.7; pointer-events: none; }
+
+  .shuffle-btn {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--muted);
+    background: #14171f; border: 1px solid var(--line); border-radius: 7px;
+    padding: 6px 11px; white-space: nowrap;
+  }
+  .shuffle-btn[aria-pressed="true"] {
+    background: var(--amber); color: #12141c; border-color: var(--amber);
+  }
+  .default-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  }
+  .default-head .hint { margin-top: 0; }
+  .footnote {
+    max-width: 1400px; margin: 0 auto; padding: 0 28px 40px;
+    color: var(--faint); font-size: 12.5px;
+  }
+  .footnote code {
+    font-family: var(--mono); background: var(--panel); padding: 1px 5px;
+    border-radius: 4px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <header>
+    <span class="on-air-dot" title="Live scheduling"></span>
+    <div class="brand">
+      <h1>Marthakal Scheduler</h1>
+      <span class="sub">playlists.json builder</span>
+    </div>
+    <label class="quality-field">
+      <span class="field-label">Max quality</span>
+      <select id="quality">
+        <option value="1080">1080p</option>
+        <option value="720" selected>720p</option>
+        <option value="480">480p</option>
+        <option value="360">360p</option>
+      </select>
+    </label>
+    <button class="ghost" id="settingsBtn" title="GitHub settings">⚙ Settings</button>
+    <button class="ghost" id="importBtn">Import existing</button>
+    <button class="ghost" id="exportBtn">Export file</button>
+    <button class="primary" id="publishBtn">Publish to Pi</button>
+    <input type="file" id="fileInput" accept="application/json,.json">
+    <input type="file" id="imageInput" accept="image/*">
+  </header>
+
+  <div class="settings-panel" id="settingsPanel" hidden>
+    <div class="settings-inner">
+      <p class="section-label" style="margin-top:0;">Publish settings</p>
+      <p class="settings-hint">
+        These let the scheduler save straight to the sign. Fill them in once —
+        they're stored only in this browser, on this computer.
+      </p>
+      <div class="settings-grid">
+        <label>Repository
+          <input type="text" id="cfgRepo" placeholder="owner/repo"
+                 value="BARKcommunications/marthakal_media_player">
+        </label>
+        <label>Branch
+          <input type="text" id="cfgBranch" placeholder="main" value="main">
+        </label>
+        <label>File path
+          <input type="text" id="cfgPath" placeholder="playlists.json" value="playlists.json">
+        </label>
+        <label>GitHub token
+          <input type="password" id="cfgToken" placeholder="github_pat_… or ghp_…" autocomplete="off">
+        </label>
+      </div>
+      <label class="remember-row">
+        <input type="checkbox" id="cfgRemember" checked>
+        <span>Remember these on this computer</span>
+      </label>
+      <p class="settings-hint">
+        Use a <strong>fine-grained token</strong> scoped to just this repository
+        with <strong>Contents: Read and write</strong> permission. Nothing else is needed.
+      </p>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="editor">
+      <p class="section-label">Scheduled blocks</p>
+      <div id="blocks"></div>
+      <button class="add-block" id="addBlock">+ Add schedule block</button>
+
+      <p class="section-label" style="margin-top:32px;">Default — plays when nothing is scheduled</p>
+      <div class="default-panel">
+        <div class="default-head">
+          <p class="hint">When no block matches the current day and time, these play on loop as the fallback.</p>
+          <button class="shuffle-btn" id="defaultShuffleBtn" aria-pressed="false"
+                  title="Play the default items in random order">⤨ Shuffle</button>
+        </div>
+        <div class="items" id="defaultItems"></div>
+        <div class="block-actions">
+          <button class="tiny" id="addDefaultItem">+ Add item</button>
+          <button class="tiny" id="addDefaultImage">+ Add image</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="preview-col">
+      <div class="preview">
+        <h2>Week preview</h2>
+        <div id="gridWrap"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </aside>
+  </div>
+
+  <p class="footnote">
+    Times use the Pi's local clock (24-hour). Items play top to bottom, then loop.
+    An item is a <code>playlist</code> URL (contains <code>list=</code>) or a single
+    <code>video</code> URL. Export, commit <code>playlists.json</code> to your repo,
+    and the Pi picks it up within ~2 minutes.
+  </p>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
+  const DAY_LABELS = { mon:"M", tue:"T", wed:"W", thu:"T", fri:"F", sat:"S", sun:"S" };
+  const DAY_FULL = ["mon","tue","wed","thu","fri","sat","sun"]; // JS getDay: 0=Sun
+  const BLOCK_COLORS = ["#f5a623","#3ec8c8","#a78bfa","#f472b6","#4ade80","#60a5fa"];
+
+  // ── State ──────────────────────────────────────────────
+  let state = {
+    maxHeight: 720,        // playback quality cap
+    audioDevice: "",       // e.g. alsa/hdmi:CARD=vc4hdmi0,DEV=0 (preserved on import)
+    schedule: [],          // { name, days:[], start, end, items:[], shuffle:false }
+    default: [""],
+    defaultShuffle: false,
+  };
+
+  // ── Helpers ────────────────────────────────────────────
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const el = (tag, props={}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k,v] of Object.entries(props)) {
+      if (k === "class") n.className = v;
+      else if (k === "html") n.innerHTML = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (v !== null && v !== undefined) n.setAttribute(k, v);
+    }
+    for (const kid of kids) {
+      if (kid == null) continue;
+      n.append(kid.nodeType ? kid : document.createTextNode(kid));
+    }
+    return n;
+  };
+  const colorFor = (i) => BLOCK_COLORS[i % BLOCK_COLORS.length];
+
+  function itemKind(url) {
+    const u = (url || "").trim();
+    if (!u) return { cls: "kind-empty", label: "empty" };
+    if (u.includes("list=")) return { cls: "kind-list", label: "playlist" };
+    if (u.includes("watch?v=") || u.includes("youtu.be/") || u.includes("/shorts/"))
+      return { cls: "kind-video", label: "video" };
+    return { cls: "kind-video", label: "url" };
+  }
+
+  function toMin(hhmm) {
+    const [h,m] = (hhmm || "0:0").split(":").map(Number);
+    return (h||0)*60 + (m||0);
+  }
+
+  // ── Item editor (shared by blocks and default) ─────────
+  function renderItems(container, items, onChange) {
+    container.innerHTML = "";
+    items.forEach((item, idx) => {
+      const up = el("button", { class: "tiny", title: "Move up", "aria-label": "Move up",
+        onclick: () => { if (idx>0){ [items[idx-1],items[idx]]=[items[idx],items[idx-1]]; onChange(); } } }, "▲");
+      const down = el("button", { class: "tiny", title: "Move down", "aria-label": "Move down",
+        onclick: () => { if (idx<items.length-1){ [items[idx+1],items[idx]]=[items[idx],items[idx+1]]; onChange(); } } }, "▼");
+      const del = el("button", { class: "tiny danger", title: "Remove", "aria-label": "Remove item",
+        onclick: () => { items.splice(idx,1); if(items.length===0) items.push(""); onChange(); } }, "✕");
+      const move = el("div", { class: "item-move" }, up, down);
+
+      if (item && typeof item === "object" && item.type === "image") {
+        // ── Image item row ──
+        const badge = el("span", { class: "item-kind kind-image" }, "image");
+        const { repo, branch } = ghSettings();
+        const thumb = el("img", { class: "thumb",
+          src: `https://raw.githubusercontent.com/${repo}/${branch}/${item.src}`,
+          alt: "", onerror: (e) => { e.target.style.display = "none"; } });
+        const nameEl = el("span", { class: "img-name", title: item.src }, item.name || item.src);
+        const dur = el("label", { class: "dur" }, "sec",
+          el("input", { type: "number", min: "1", value: String(item.duration || 10),
+            oninput: (e) => { item.duration = parseInt(e.target.value, 10) || 10; } }));
+        container.append(el("div", { class: "item image-item" }, badge, thumb, nameEl, dur, move, del));
+      } else {
+        // ── URL (video/playlist) item row ──
+        const url = typeof item === "string" ? item : "";
+        const kind = itemKind(url);
+        const badge = el("span", { class: "item-kind " + kind.cls }, kind.label);
+        const input = el("input", {
+          type: "text", value: url, placeholder: "https://www.youtube.com/playlist?list=…",
+          oninput: (e) => { items[idx] = e.target.value;
+            badge.className = "item-kind " + itemKind(e.target.value).cls;
+            badge.textContent = itemKind(e.target.value).label;
+            scheduleRenderGrid(); },
+        });
+        container.append(el("div", { class: "item" }, badge, input, move, del));
+      }
+    });
+  }
+
+  // ── Block rendering ────────────────────────────────────
+  function renderBlocks() {
+    const root = $("#blocks");
+    root.innerHTML = "";
+    if (state.schedule.length === 0) {
+      root.append(el("div", { class: "empty-state" },
+        "No scheduled blocks yet. Add one, or rely on the default playlist below."));
+    }
+    state.schedule.forEach((block, i) => {
+      const accent = colorFor(i);
+      const card = el("div", { class: "block", style: `--accent:${accent}` });
+
+      // Head: index + name + delete
+      const nameInput = el("input", { type: "text", class: "block-name",
+        value: block.name || "", placeholder: "Block name (e.g. Weekday mornings)",
+        oninput: (e) => { block.name = e.target.value; scheduleRenderGrid(); } });
+      card.append(el("div", { class: "block-head" },
+        el("span", { class: "block-index" }, String(i+1).padStart(2,"0")),
+        nameInput,
+        el("button", { class: "shuffle-btn", "aria-pressed": String(!!block.shuffle),
+          title: "Play this block's items in random order",
+          onclick: () => { block.shuffle = !block.shuffle; render(); } }, "⤨ Shuffle"),
+        el("button", { class: "tiny danger", onclick: () => { state.schedule.splice(i,1); render(); } }, "Delete")
+      ));
+
+      // Days
+      const dayRow = el("div", { class: "row" }, el("span", { class: "field-label" }, "Days"));
+      const dayWrap = el("div", { class: "days" });
+      DAYS.forEach(d => {
+        const on = block.days.includes(d);
+        dayWrap.append(el("button", {
+          class: "day-btn", "aria-pressed": String(on), "aria-label": d,
+          onclick: () => {
+            const at = block.days.indexOf(d);
+            if (at >= 0) block.days.splice(at,1); else block.days.push(d);
+            render();
+          }
+        }, DAY_LABELS[d]));
+      });
+      dayRow.append(dayWrap);
+      card.append(dayRow);
+
+      // Times
+      const wraps = toMin(block.end) <= toMin(block.start);
+      const timeRow = el("div", { class: "row" },
+        el("span", { class: "field-label" }, "From"),
+        el("input", { type: "time", value: block.start || "09:00",
+          oninput: (e)=>{ block.start = e.target.value; render(); } }),
+        el("span", { class: "time-sep" }, "→"),
+        el("span", { class: "field-label" }, "To"),
+        el("input", { type: "time", value: block.end || "17:00",
+          oninput: (e)=>{ block.end = e.target.value; render(); } }),
+        wraps ? el("span", { class: "wrap-note" }, "wraps past midnight") : null
+      );
+      card.append(timeRow);
+
+      // Items
+      const itemsWrap = el("div", { class: "items" });
+      renderItems(itemsWrap, block.items, () => render());
+      card.append(itemsWrap);
+      card.append(el("div", { class: "block-actions" },
+        el("button", { class: "tiny", onclick: () => { block.items.push(""); render(); } }, "+ Add item"),
+        el("button", { class: "tiny", onclick: () => pickImage(block.items) }, "+ Add image")
+      ));
+
+      root.append(card);
+    });
+  }
+
+  function renderDefault() {
+    renderItems($("#defaultItems"), state.default, () => render());
+    const btn = $("#defaultShuffleBtn");
+    if (btn) btn.setAttribute("aria-pressed", String(!!state.defaultShuffle));
+  }
+
+  // ── Week grid preview ──────────────────────────────────
+  const HOUR_PX = 14;
+  function renderGrid() {
+    const wrap = $("#gridWrap");
+    wrap.innerHTML = "";
+    const now = new Date();
+    const todayIdx = (now.getDay() + 6) % 7; // convert Sun=0 to Mon=0
+
+    const grid = el("div", { class: "grid" });
+    grid.append(el("div", { class: "grid-corner" }));
+    DAYS.forEach((d, i) => {
+      grid.append(el("div", { class: "grid-day" + (i===todayIdx ? " today":"") }, DAY_LABELS[d]));
+    });
+
+    // hours column
+    const hours = el("div", { class: "hours", style:`height:${24*HOUR_PX}px` });
+    for (let h=0; h<=24; h+=3) {
+      hours.append(el("div", { class:"hour-label", style:`top:${h*HOUR_PX}px` },
+        (h<10?"0":"")+h+":00"));
+    }
+    grid.append(hours);
+
+    // day columns
+    DAYS.forEach((d, di) => {
+      const col = el("div", { class:"col" });
+      for (let h=0; h<=24; h+=3) {
+        col.append(el("div", { class:"hour-line", style:`top:${h*HOUR_PX}px` }));
+      }
+      // bands for this day
+      state.schedule.forEach((block, bi) => {
+        if (!block.days.includes(d)) return;
+        const s = toMin(block.start), e = toMin(block.end);
+        const segs = (e <= s) ? [[s,1440],[0,e]] : [[s,e]]; // handle wrap
+        segs.forEach(([a,b]) => {
+          if (b<=a) return;
+          const top = (a/60)*HOUR_PX;
+          const hgt = ((b-a)/60)*HOUR_PX;
+          const band = el("div", { class:"band",
+            style:`top:${top}px;height:${hgt}px;--band:${colorFor(bi)}`,
+            title: `${block.name||"Block "+(bi+1)} · ${block.start}–${block.end}` });
+          if (hgt > 12) band.append(el("span", {}, block.name || ("Block "+(bi+1))));
+          col.append(band);
+        });
+      });
+      // now-line on today
+      if (di === todayIdx) {
+        const mins = now.getHours()*60 + now.getMinutes();
+        col.append(el("div", { class:"now-line", style:`top:${(mins/60)*HOUR_PX}px` }));
+      }
+      grid.append(col);
+    });
+
+    wrap.append(grid);
+
+    // legend
+    const legend = $("#legend");
+    legend.innerHTML = "";
+    state.schedule.forEach((block, bi) => {
+      legend.append(el("div", { class:"lg" },
+        el("span", { class:"sw", style:`background:${colorFor(bi)}` }),
+        block.name || ("Block "+(bi+1))));
+    });
+    if (state.schedule.length === 0) {
+      legend.append(el("div", { class:"lg" }, "Default plays all week until you add blocks."));
+    }
+  }
+
+  // Debounce grid rendering on rapid input
+  let gridTimer = null;
+  function scheduleRenderGrid() {
+    clearTimeout(gridTimer);
+    gridTimer = setTimeout(renderGrid, 120);
+  }
+
+  function render() {
+    renderBlocks();
+    renderDefault();
+    renderGrid();
+  }
+
+  // ── Build the config object ────────────────────────────
+  function cleanItems(items) {
+    const out = [];
+    items.forEach(it => {
+      if (it && typeof it === "object" && it.type === "image") {
+        if (it.src) out.push({ type: "image", src: it.src, duration: it.duration || 10 });
+      } else if (typeof it === "string" && it.trim()) {
+        out.push(it.trim());
+      }
+    });
+    return out;
+  }
+
+  function buildConfig() {
+    const out = { max_height: state.maxHeight };
+    if (state.audioDevice) out.audio_device = state.audioDevice;
+    out.schedule = [];
+    state.schedule.forEach(b => {
+      const block = {
+        name: (b.name||"").trim() || "Untitled block",
+        days: DAYS.filter(d => b.days.includes(d)),   // canonical order
+        start: b.start || "00:00",
+        end: b.end || "23:59",
+        items: cleanItems(b.items),
+      };
+      if (b.shuffle) block.shuffle = true;
+      out.schedule.push(block);
+    });
+    out.default = cleanItems(state.default);
+    if (state.defaultShuffle) out.default_shuffle = true;
+    return out;
+  }
+
+  function configText() {
+    return JSON.stringify(buildConfig(), null, 2);
+  }
+
+  // ── Export (download a file) ───────────────────────────
+  function exportJSON() {
+    const blob = new Blob([configText()], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = el("a", { href:url, download:"playlists.json" });
+    document.body.append(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showToast("playlists.json exported");
+  }
+
+  // ── Publish (commit to GitHub) ─────────────────────────
+  // UTF-8 safe base64 for the file content GitHub expects.
+  function toBase64(str) {
+    return btoa(unescape(encodeURIComponent(str)));
+  }
+
+  function ghSettings() {
+    return {
+      repo:   $("#cfgRepo").value.trim(),
+      branch: $("#cfgBranch").value.trim() || "main",
+      path:   $("#cfgPath").value.trim() || "playlists.json",
+      token:  $("#cfgToken").value.trim(),
+    };
+  }
+
+  // Encode a repo file path for the API URL without mangling the "/" separators.
+  function apiPath(p) {
+    return p.split("/").map(encodeURIComponent).join("/");
+  }
+
+  // ── Images: pick a file, commit it to the repo, add an item ──
+  let pendingItems = null;   // the items array the picked image belongs to
+  function pickImage(itemsArray) {
+    const { repo, token } = ghSettings();
+    if (!repo || !repo.includes("/") || !token) {
+      showToast("Add your GitHub token in Settings first"); openSettings(true); return;
+    }
+    pendingItems = itemsArray;
+    $("#imageInput").click();
+  }
+
+  function fileToBase64(file) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(",")[1]);  // strip data: prefix
+      r.onerror = () => rej(new Error("Could not read the image file"));
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function commitImage(file) {
+    const { repo, branch, token } = ghSettings();
+    const ext = (file.name.split(".").pop() || "img").toLowerCase();
+    const base = file.name.replace(/\.[^.]+$/, "")
+                          .replace(/[^a-z0-9_-]+/gi, "-").toLowerCase().slice(0, 40) || "image";
+    // Short suffix avoids collisions between different images of the same name.
+    const repoPath = `images/${base}-${Date.now().toString(36)}.${ext}`;
+    const b64 = await fileToBase64(file);
+    const api = `https://api.github.com/repos/${repo}/contents/${apiPath(repoPath)}`;
+    const res = await fetch(api, {
+      method: "PUT",
+      headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json" },
+      body: JSON.stringify({ message: `Add image ${repoPath} via scheduler`, content: b64, branch }),
+    });
+    if (res.status === 201 || res.status === 200) return repoPath;
+    if (res.status === 401) throw new Error("Token rejected (401). Check Settings.");
+    if (res.status === 403) throw new Error("Access denied (403). Token needs Contents: Read and write.");
+    const msg = (await res.json().catch(()=>({}))).message || res.status;
+    throw new Error(`Image upload failed: ${msg}`);
+  }
+
+  async function handleImagePicked(file) {
+    if (!file || !pendingItems) return;
+    if (!file.type.startsWith("image/")) { showToast("That's not an image file"); return; }
+    if (file.size > 20 * 1024 * 1024) { showToast("Image is too large (max 20 MB)"); return; }
+    const target = pendingItems;
+    showToast("Uploading image…");
+    try {
+      const repoPath = await commitImage(file);
+      target.push({ type: "image", src: repoPath, name: file.name, duration: 10 });
+      render();
+      showToast("Image added — set its duration, then Publish");
+    } catch (err) {
+      showToast(err.message || "Image upload failed");
+    } finally {
+      pendingItems = null;
+    }
+  }
+
+  async function publishToGitHub() {
+    const { repo, branch, path, token } = ghSettings();
+    if (!repo || !repo.includes("/")) {
+      showToast("Set the repository as owner/repo in Settings"); openSettings(true); return;
+    }
+    if (!token) {
+      showToast("Add your GitHub token in Settings"); openSettings(true); return;
+    }
+
+    const btn = $("#publishBtn");
+    btn.classList.add("busy"); btn.textContent = "Publishing…";
+    const api = `https://api.github.com/repos/${repo}/contents/${encodeURIComponent(path)}`;
+    const headers = {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+    };
+
+    try {
+      // 1. Look up the current file's SHA (needed to update an existing file)
+      let sha = undefined;
+      const getRes = await fetch(`${api}?ref=${encodeURIComponent(branch)}`, { headers });
+      if (getRes.status === 200) {
+        sha = (await getRes.json()).sha;
+      } else if (getRes.status === 404) {
+        sha = undefined;                       // file doesn't exist yet — will create it
+      } else if (getRes.status === 401) {
+        throw new Error("Token rejected (401). Check the token in Settings.");
+      } else if (getRes.status === 403) {
+        throw new Error("Access denied (403). Token needs Contents: Read and write on this repo.");
+      } else {
+        throw new Error(`GitHub returned ${getRes.status} while reading the file.`);
+      }
+
+      // 2. Commit the new content
+      const body = {
+        message: `Update playlists.json via scheduler — ${new Date().toISOString()}`,
+        content: toBase64(configText()),
+        branch,
+      };
+      if (sha) body.sha = sha;
+
+      const putRes = await fetch(api, { method: "PUT", headers, body: JSON.stringify(body) });
+      if (putRes.status === 200 || putRes.status === 201) {
+        showToast("Published! The sign updates within ~2 minutes.");
+      } else if (putRes.status === 409) {
+        throw new Error("Conflict (409) — someone else changed the file. Re-import and try again.");
+      } else {
+        const msg = (await putRes.json().catch(()=>({}))).message || putRes.status;
+        throw new Error(`Publish failed: ${msg}`);
+      }
+    } catch (err) {
+      showToast(err.message || "Publish failed — check Settings and connection.");
+    } finally {
+      btn.classList.remove("busy"); btn.textContent = "Publish to Pi";
+    }
+  }
+
+  // ── Populate the UI from a parsed config object ────────
+  function applyConfig(data) {
+    if (data.max_height) {
+      state.maxHeight = parseInt(data.max_height, 10) || 720;
+      $("#quality").value = String(state.maxHeight);
+    }
+    state.audioDevice = typeof data.audio_device === "string" ? data.audio_device : "";
+    state.schedule = [];
+    if (Array.isArray(data.schedule)) {
+      data.schedule.forEach(b => state.schedule.push({
+        name: b.name || "",
+        days: Array.isArray(b.days) ? b.days.filter(d=>DAYS.includes(d)) : [],
+        start: b.start || "09:00",
+        end: b.end || "17:00",
+        items: Array.isArray(b.items) && b.items.length ? b.items.slice() : [""],
+        shuffle: !!b.shuffle,
+      }));
+    }
+    if (Array.isArray(data.default) && data.default.length) {
+      state.default = data.default.slice();
+    } else if (Array.isArray(data.playlists) && data.playlists.length) {
+      state.default = data.playlists.slice();      // old schema
+    } else {
+      state.default = [""];
+    }
+    state.defaultShuffle = !!data.default_shuffle;
+    render();
+  }
+
+  function importJSON(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        applyConfig(JSON.parse(reader.result));
+        showToast("Loaded playlists.json");
+      } catch (err) {
+        showToast("Could not read that file — is it valid JSON?");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ── Auto-load the live config from the repo on open ────
+  async function loadLiveConfig() {
+    const { repo, branch, path } = ghSettings();
+    if (!repo || !repo.includes("/")) return false;   // no repo set yet — keep seed
+    // Raw URL; cache-buster so we always get the newest, not a CDN-cached copy
+    const raw = `https://raw.githubusercontent.com/${repo}/${branch}/${path}?t=${Date.now()}`;
+    try {
+      const res = await fetch(raw);
+      if (!res.ok) return false;
+      applyConfig(await res.json());
+      showToast("Loaded the current live schedule");
+      return true;
+    } catch (e) {
+      return false;   // offline or not found — fall back to the seed
+    }
+  }
+
+  // ── Toast ──────────────────────────────────────────────
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = $("#toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+  }
+
+  // ── Settings persistence (this browser only) ───────────
+  const STORE_KEY = "marthakal_publish_settings";
+  function saveSettings() {
+    if (!$("#cfgRemember").checked) {
+      try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+      return;
+    }
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        repo: $("#cfgRepo").value, branch: $("#cfgBranch").value,
+        path: $("#cfgPath").value, token: $("#cfgToken").value,
+      }));
+    } catch (e) {}
+  }
+  function loadSettings() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+      if (!s) return;
+      if (s.repo)   $("#cfgRepo").value = s.repo;
+      if (s.branch) $("#cfgBranch").value = s.branch;
+      if (s.path)   $("#cfgPath").value = s.path;
+      if (s.token)  $("#cfgToken").value = s.token;
+    } catch (e) {}
+  }
+  function openSettings(force) {
+    const p = $("#settingsPanel");
+    p.hidden = force ? false : !p.hidden;
+  }
+
+  // ── Wire up ────────────────────────────────────────────
+  $("#addBlock").addEventListener("click", () => {
+    state.schedule.push({
+      name: "", days: ["mon","tue","wed","thu","fri"],
+      start: "09:00", end: "17:00", items: [""], shuffle: false,
+    });
+    render();
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  });
+  $("#addDefaultItem").addEventListener("click", () => { state.default.push(""); render(); });
+  $("#addDefaultImage").addEventListener("click", () => pickImage(state.default));
+  $("#defaultShuffleBtn").addEventListener("click", () => { state.defaultShuffle = !state.defaultShuffle; render(); });
+  $("#imageInput").addEventListener("change", (e) => {
+    if (e.target.files[0]) handleImagePicked(e.target.files[0]);
+    e.target.value = "";
+  });
+  $("#quality").addEventListener("change", (e) => { state.maxHeight = parseInt(e.target.value, 10) || 720; });
+  $("#exportBtn").addEventListener("click", exportJSON);
+  $("#importBtn").addEventListener("click", () => $("#fileInput").click());
+  $("#fileInput").addEventListener("change", (e) => {
+    if (e.target.files[0]) importJSON(e.target.files[0]);
+    e.target.value = "";
+  });
+  $("#settingsBtn").addEventListener("click", () => openSettings());
+  $("#publishBtn").addEventListener("click", () => { saveSettings(); publishToGitHub(); });
+  ["cfgRepo","cfgBranch","cfgPath","cfgToken","cfgRemember"].forEach(id =>
+    $("#"+id).addEventListener("change", saveSettings));
+  loadSettings();
+
+  // Refresh the now-line every minute
+  setInterval(renderGrid, 60000);
+
+  // ── On open: pull the live schedule from the repo ──────
+  // Falls back to a starter block if the repo isn't reachable or not set.
+  (async () => {
+    const loaded = await loadLiveConfig();
+    if (!loaded) {
+      state.schedule.push({
+        name: "Weekday mornings", days: ["mon","tue","wed","thu","fri"],
+        start: "09:00", end: "12:00", items: [""], shuffle: false,
+      });
+      render();
+    }
+  })();
+})();
+</script>
+</body>
+</html>
