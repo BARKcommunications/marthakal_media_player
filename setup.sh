@@ -48,9 +48,12 @@ sudo apt-get install -y -qq \
 info "Packages installed"
 
 # ── yt-dlp ────────────────────────────────────────────────────
-section "Installing yt-dlp"
-pip3 install --quiet --break-system-packages --upgrade yt-dlp
-info "yt-dlp installed"
+# YouTube changes constantly and the stable yt-dlp often lags the fixes by days
+# or weeks (e.g. the Aug 2026 android_vr 403 breakage). The --pre (pre-release)
+# build carries the newest client/challenge fixes, which headless playback needs.
+section "Installing yt-dlp (pre-release for latest YouTube fixes)"
+pip3 install --quiet --break-system-packages --upgrade --pre "yt-dlp[default]"
+info "yt-dlp installed: $(yt-dlp --version 2>/dev/null)"
 
 # ── Deno (JavaScript runtime for YouTube extraction) ──────────
 # YouTube now requires solving a JS challenge to extract streams. yt-dlp uses

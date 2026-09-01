@@ -32,6 +32,7 @@ RETRY_DELAY = 5          # Seconds between retries
 EMPTY_WAIT = 30          # Seconds to wait when there's nothing to play
 MIN_PLAY_OK = 3          # A "video" shorter than this is treated as a failure
 VIDEO_TIMEOUT = 7200     # Hard cap per video (2 hours)
+RESOLVE_TIMEOUT = 60     # Seconds allowed for yt-dlp to resolve a stream URL
 
 # YouTube now requires a JS challenge solver. These args tell yt-dlp to use the
 # EJS solver (fetched from GitHub) with the Deno runtime installed by setup.sh.
@@ -202,6 +203,31 @@ def expand_items(items: list) -> list:
     return entries
 
 
+def resolve_stream_url(page_url: str):
+    """
+    Resolve a YouTube page URL to direct stream URL(s) using the yt-dlp CLI,
+    which reliably picks a Pi-friendly https H.264 stream. mpv's own ytdl hook
+    tends to pick visionos/m3u8 formats that don't play, so we resolve here and
+    hand mpv the finished URL(s). yt-dlp -g prints one URL per line: usually two
+    (video, then audio), or one for a muxed stream. Returns a list of 1-2 URLs,
+    or None on failure.
+    """
+    cmd = ["yt-dlp", "-f", ytdl_format(MAX_HEIGHT), "-g", "--no-warnings"] + YTDLP_EJS + [page_url]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=RESOLVE_TIMEOUT)
+        lines = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith("http")]
+        if not lines:
+            log.warning(f"Could not resolve stream for: {page_url}")
+            return None
+        return lines[:2]
+    except subprocess.TimeoutExpired:
+        log.warning("yt-dlp -g timed out resolving stream.")
+        return None
+    except FileNotFoundError:
+        log.error("yt-dlp not found. Run setup.sh to install.")
+        sys.exit(1)
+
+
 # ─── mpv IPC control ──────────────────────────────────────────────────────────
 
 class MpvIPC:
@@ -256,7 +282,11 @@ class MpvIPC:
     def get(self, prop: str):
         return self.command(["get_property", prop]).get("data")
 
-    def loadfile(self, path: str):
+    def loadfile(self, path: str, audio_url: str = None):
+        # Attach (or clear) a separate audio track via the audio-files property
+        # before loading. Works across mpv versions and avoids URL-escaping
+        # pitfalls of the loadfile options argument.
+        self.command(["set_property", "audio-files", [audio_url] if audio_url else []])
         return self.command(["loadfile", path, "replace"])
 
     def close(self):
@@ -291,10 +321,6 @@ def start_mpv() -> subprocess.Popen:
         "--image-display-duration=inf",     # splash image stays until replaced
         "--cache=yes",
         "--cache-secs=20",
-        # Let mpv's built-in yt-dlp resolve YouTube itself, so the fetch and
-        # playback share one client context (no 403s from client-locked URLs).
-        f"--ytdl-format={ytdl_format(MAX_HEIGHT)}",
-        "--ytdl-raw-options=remote-components=ejs:github",
         f"--input-ipc-server={MPV_SOCKET}",
     ]
     if AUDIO_DEVICE:
@@ -334,13 +360,18 @@ def wait_until_idle(mpv: MpvIPC, timeout: float = VIDEO_TIMEOUT) -> float:
 
 def play_video(mpv: MpvIPC, page_url: str) -> bool:
     """
-    Play a video by handing the YouTube page URL to mpv, which resolves and
-    plays it with its own yt-dlp hook. Because the fetch and playback share one
-    client context, YouTube doesn't reject the stream (no 403s). True on success.
+    Resolve the video with yt-dlp (which reliably picks a playable https H.264
+    stream), then hand the finished URL(s) to mpv. The splash stays on screen
+    during the resolve. True on success.
     """
+    urls = resolve_stream_url(page_url)
+    if not urls:
+        return False
+    video_url = urls[0]
+    audio_url = urls[1] if len(urls) > 1 else None
     log.info(f"Playing (max {MAX_HEIGHT}p): {page_url}")
     try:
-        mpv.loadfile(page_url)
+        mpv.loadfile(video_url, audio_url)
     except Exception as exc:
         log.warning(f"mpv loadfile failed: {exc}")
         return False
