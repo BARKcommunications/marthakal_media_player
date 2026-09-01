@@ -143,6 +143,7 @@ OnUnitActiveSec=2min
 WantedBy=timers.target
 UPDTIMER
 info "Auto-update timer created (checks every 2 minutes)"
+info "yt-dlp auto-refresh is handled inside update.sh (daily, via the same timer)"
 
 # ── Enable everything ─────────────────────────────────────────
 section "Enabling services"
