@@ -62,9 +62,13 @@ the sign's current live schedule automatically.
    many seconds it stays on screen.
 4. **Shuffle** — the *⤨ Shuffle* toggle on any block plays its items in a random order,
    re-shuffled each loop. Off by default.
-5. **Set the default** — plays whenever no block matches (e.g. overnight).
-6. **Max quality** — leave at **720p**. See the warning below.
-7. Click **Publish to Pi**. The sign updates within ~2 minutes.
+5. **Img every** — set this to `3` and an image plays after every 3 videos, cycling
+   through that block's images, rather than playing them where they sit in the list.
+   Leave at `0` for list order. Works alongside shuffle: the videos are shuffled, the
+   images stay evenly spaced.
+6. **Set the default** — plays whenever no block matches (e.g. overnight).
+7. **Max quality** — leave at **720p**. See the warning below.
+8. Click **Publish to Pi**. The sign updates within ~2 minutes.
 
 > **Quality warning:** 1080p causes stuttering and dropped videos on a Pi 4 — YouTube
 > serves VP9 at that resolution, which the Pi can't decode in hardware. **Use 720p.**
@@ -98,11 +102,13 @@ The token is stored only in that browser. Note its expiry date and renew before 
         "https://www.youtube.com/watch?v=singlevideo",
         { "type": "image", "src": "images/promo.png", "duration": 10 }
       ],
-      "shuffle": true
+      "shuffle": true,
+      "image_every": 3
     }
   ],
   "default": ["https://www.youtube.com/playlist?list=PLdefault"],
-  "default_shuffle": true
+  "default_shuffle": true,
+  "default_image_every": 3
 }
 ```
 
@@ -113,6 +119,8 @@ The token is stored only in that browser. Note its expiry date and renew before 
 - **`start`/`end`** — 24-hour, the Pi's local clock. An end earlier than the start
   (e.g. `22:00`–`02:00`) wraps past midnight.
 - **`shuffle` / `default_shuffle`** — omit or `false` to play in order.
+- **`image_every` / `default_image_every`** — show an image after every N videos
+  instead of playing images where they sit in the list. Omit or `0` for list order.
 
 ---
 

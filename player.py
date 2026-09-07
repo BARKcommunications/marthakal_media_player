@@ -128,16 +128,20 @@ def _block_active(block: dict, now: datetime.datetime) -> bool:
 
 
 def resolve_active_source(cfg: dict, now: datetime.datetime):
-    """Decide what should play now. Returns (source_id, items_list, shuffle)."""
+    """Decide what should play now.
+    Returns (source_id, items_list, shuffle, image_every)."""
     for i, block in enumerate(cfg.get("schedule", [])):
         if _block_active(block, now):
             name = block.get("name", f"block-{i}")
-            return (f"schedule:{i}:{name}", block.get("items", []), bool(block.get("shuffle", False)))
+            return (f"schedule:{i}:{name}", block.get("items", []),
+                    bool(block.get("shuffle", False)),
+                    _safe_int(block.get("image_every"), 0))
     if "default" in cfg:
-        return ("default", cfg.get("default", []), bool(cfg.get("default_shuffle", False)))
+        return ("default", cfg.get("default", []), bool(cfg.get("default_shuffle", False)),
+                _safe_int(cfg.get("default_image_every"), 0))
     if "playlists" in cfg:                # backward compatibility
-        return ("default", cfg.get("playlists", []), bool(cfg.get("shuffle", False)))
-    return ("default", [], False)
+        return ("default", cfg.get("playlists", []), bool(cfg.get("shuffle", False)), 0)
+    return ("default", [], False, 0)
 
 
 # ─── yt-dlp helpers ───────────────────────────────────────────────────────────
@@ -213,6 +217,34 @@ def expand_items(items: list) -> list:
             else:
                 entries.append({"kind": "video", "url": s})
     return entries
+
+
+_image_cursor = 0    # keeps the image rotation moving across queue rebuilds
+
+
+def interleave_images(entries: list, every: int) -> list:
+    """
+    Space images out through the videos instead of playing them where they sit
+    in the config: show one image after every `every` videos, taking each image
+    in turn. With more images than slots in a cycle, the rotation picks up where
+    it left off next time round, so they all get screen time eventually.
+
+    `every` of 0 (or a queue with no images, or no videos) leaves the order alone.
+    """
+    global _image_cursor
+    if every < 1:
+        return entries
+    videos = [e for e in entries if e.get("kind") != "image"]
+    images = [e for e in entries if e.get("kind") == "image"]
+    if not videos or not images:
+        return entries
+    out = []
+    for i, video in enumerate(videos, 1):
+        out.append(video)
+        if i % every == 0:
+            out.append(images[_image_cursor % len(images)])
+            _image_cursor += 1
+    return out
 
 
 def resolve_stream_url(page_url: str):
@@ -470,7 +502,8 @@ def run() -> None:
     try:
         while True:
             cfg = load_config()
-            source_id, items, shuffle = resolve_active_source(cfg, datetime.datetime.now())
+            source_id, items, shuffle, image_every = resolve_active_source(
+                cfg, datetime.datetime.now())
 
             if source_id != current_source or index >= len(queue):
                 if source_id != current_source:
@@ -479,6 +512,10 @@ def run() -> None:
                 if shuffle:
                     random.shuffle(queue)          # fresh random order each cycle
                     log.info(f"Shuffled {len(queue)} item(s).")
+                if image_every:
+                    queue = interleave_images(queue, image_every)
+                    log.info(f"Images spaced every {image_every} video(s) — "
+                             f"{len(queue)} item(s) in the cycle.")
                 index = 0
                 current_source = source_id
                 if not queue:
