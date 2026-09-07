@@ -23,9 +23,21 @@ import time
 # ─── Paths & configuration ────────────────────────────────────────────────────
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(SCRIPT_DIR, "playlists.json")
+HOSTNAME = socket.gethostname()                        # e.g. marthakalmedia001
+SHARED_CONFIG = os.path.join(SCRIPT_DIR, "playlists.json")   # shared default fallback
 SPLASH_PATH = os.path.join(SCRIPT_DIR, "splash.png")   # optional; upload to repo
 MPV_SOCKET = "/tmp/mpv-marthakal.sock"
+
+
+def config_path() -> str:
+    """
+    This device reads devices/<hostname>/playlists.json. If that folder doesn't
+    exist in the repo yet, it falls back to the shared playlists.json at the root.
+    So a new sign just needs a matching hostname + a folder in the repo.
+    """
+    dev = os.path.join(SCRIPT_DIR, "devices", HOSTNAME, "playlists.json")
+    return dev if os.path.exists(dev) else SHARED_CONFIG
+
 
 MAX_RETRIES = 3          # How many times to retry a failed video
 RETRY_DELAY = 5          # Seconds between retries
@@ -81,7 +93,7 @@ def load_config():
     invalid (e.g. mid git-pull) so a bad commit never takes the screen down."""
     global _last_good_config
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(config_path(), "r", encoding="utf-8") as f:
             cfg = json.load(f)
         _last_good_config = cfg
         return cfg
@@ -426,6 +438,11 @@ def play_entry(mpv: MpvIPC, entry: dict) -> None:
 
 def run() -> None:
     log.info("Marthakal Media Player starting up.")
+    _cfg_path = config_path()
+    if _cfg_path == SHARED_CONFIG:
+        log.info(f"Device '{HOSTNAME}': no device folder in repo — using shared default config.")
+    else:
+        log.info(f"Device '{HOSTNAME}': using devices/{HOSTNAME}/playlists.json")
 
     # Read audio device and quality from config before launching mpv — both are
     # baked into the mpv launch (audio output + the yt-dlp format string). A

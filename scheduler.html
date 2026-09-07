@@ -313,6 +313,12 @@
     border-radius: 8px; padding: 8px 10px; cursor: pointer; color-scheme: dark;
   }
   #quality:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  #deviceNum {
+    font-family: var(--mono); font-size: 13px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; text-align: center;
+  }
+  #deviceNum:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
   .settings-panel {
     border-bottom: 1px solid var(--line);
@@ -375,6 +381,11 @@
       <span class="sub">playlists.json builder</span>
     </div>
     <label class="quality-field">
+      <span class="field-label">Device</span>
+      <input type="text" id="deviceNum" value="001" inputmode="numeric"
+             title="Which sign to edit (001, 002, …)" style="width:70px;">
+    </label>
+    <label class="quality-field">
       <span class="field-label">Max quality</span>
       <select id="quality">
         <option value="1080">1080p</option>
@@ -408,6 +419,9 @@
         </label>
         <label>File path
           <input type="text" id="cfgPath" placeholder="playlists.json" value="playlists.json">
+        </label>
+        <label>Device name prefix
+          <input type="text" id="cfgPrefix" placeholder="marthakalmedia" value="marthakalmedia">
         </label>
         <label>GitHub token
           <input type="password" id="cfgToken" placeholder="github_pat_… or ghp_…" autocomplete="off">
@@ -771,6 +785,13 @@
     };
   }
 
+  // The file this device's schedule lives in: devices/<prefix><number>/playlists.json
+  function devicePath() {
+    const prefix = ($("#cfgPrefix").value.trim() || "marthakalmedia");
+    const num = ($("#deviceNum").value.trim() || "001");
+    return `devices/${prefix}${num}/playlists.json`;
+  }
+
   // Encode a repo file path for the API URL without mangling the "/" separators.
   function apiPath(p) {
     return p.split("/").map(encodeURIComponent).join("/");
@@ -836,7 +857,8 @@
   }
 
   async function publishToGitHub() {
-    const { repo, branch, path, token } = ghSettings();
+    const { repo, branch, token } = ghSettings();
+    const path = devicePath();
     if (!repo || !repo.includes("/")) {
       showToast("Set the repository as owner/repo in Settings"); openSettings(true); return;
     }
@@ -846,7 +868,7 @@
 
     const btn = $("#publishBtn");
     btn.classList.add("busy"); btn.textContent = "Publishing…";
-    const api = `https://api.github.com/repos/${repo}/contents/${encodeURIComponent(path)}`;
+    const api = `https://api.github.com/repos/${repo}/contents/${apiPath(path)}`;
     const headers = {
       "Authorization": `Bearer ${token}`,
       "Accept": "application/vnd.github+json",
@@ -870,7 +892,7 @@
 
       // 2. Commit the new content
       const body = {
-        message: `Update playlists.json via scheduler — ${new Date().toISOString()}`,
+        message: `Update ${path} via scheduler — ${new Date().toISOString()}`,
         content: toBase64(configText()),
         branch,
       };
@@ -878,7 +900,7 @@
 
       const putRes = await fetch(api, { method: "PUT", headers, body: JSON.stringify(body) });
       if (putRes.status === 200 || putRes.status === 201) {
-        showToast("Published! The sign updates within ~2 minutes.");
+        showToast(`Published to ${path} — the sign updates within ~2 minutes.`);
       } else if (putRes.status === 409) {
         throw new Error("Conflict (409) — someone else changed the file. Re-import and try again.");
       } else {
@@ -936,19 +958,35 @@
 
   // ── Auto-load the live config from the repo on open ────
   async function loadLiveConfig() {
-    const { repo, branch, path } = ghSettings();
+    const { repo, branch } = ghSettings();
     if (!repo || !repo.includes("/")) return false;   // no repo set yet — keep seed
-    // Raw URL; cache-buster so we always get the newest, not a CDN-cached copy
-    const raw = `https://raw.githubusercontent.com/${repo}/${branch}/${path}?t=${Date.now()}`;
+    const bust = `?t=${Date.now()}`;                  // avoid stale CDN cache
+    const deviceUrl = `https://raw.githubusercontent.com/${repo}/${branch}/${devicePath()}${bust}`;
+    const sharedUrl = `https://raw.githubusercontent.com/${repo}/${branch}/playlists.json${bust}`;
     try {
-      const res = await fetch(raw);
-      if (!res.ok) return false;
-      applyConfig(await res.json());
-      showToast("Loaded the current live schedule");
-      return true;
+      // Try this device's own config first
+      let res = await fetch(deviceUrl);
+      if (res.ok) {
+        applyConfig(await res.json());
+        showToast(`Loaded ${devicePath()}`);
+        return true;
+      }
+      // Device folder doesn't exist yet — start from the shared default
+      res = await fetch(sharedUrl);
+      if (res.ok) {
+        applyConfig(await res.json());
+        showToast("New device — starting from the shared default. Publish to create it.");
+        return true;
+      }
+      return false;
     } catch (e) {
-      return false;   // offline or not found — fall back to the seed
+      return false;   // offline — fall back to the seed
     }
+  }
+
+  // Reload when the user switches device number
+  function reloadForDevice() {
+    loadLiveConfig().then(loaded => { if (!loaded) render(); });
   }
 
   // ── Toast ──────────────────────────────────────────────
@@ -972,6 +1010,7 @@
       localStorage.setItem(STORE_KEY, JSON.stringify({
         repo: $("#cfgRepo").value, branch: $("#cfgBranch").value,
         path: $("#cfgPath").value, token: $("#cfgToken").value,
+        prefix: $("#cfgPrefix").value,
       }));
     } catch (e) {}
   }
@@ -983,6 +1022,7 @@
       if (s.branch) $("#cfgBranch").value = s.branch;
       if (s.path)   $("#cfgPath").value = s.path;
       if (s.token)  $("#cfgToken").value = s.token;
+      if (s.prefix) $("#cfgPrefix").value = s.prefix;
     } catch (e) {}
   }
   function openSettings(force) {
@@ -1002,6 +1042,7 @@
   $("#addDefaultItem").addEventListener("click", () => { state.default.push(""); render(); });
   $("#addDefaultImage").addEventListener("click", () => pickImage(state.default));
   $("#defaultShuffleBtn").addEventListener("click", () => { state.defaultShuffle = !state.defaultShuffle; render(); });
+  $("#deviceNum").addEventListener("change", reloadForDevice);
   $("#imageInput").addEventListener("change", (e) => {
     if (e.target.files[0]) handleImagePicked(e.target.files[0]);
     e.target.value = "";
@@ -1015,7 +1056,7 @@
   });
   $("#settingsBtn").addEventListener("click", () => openSettings());
   $("#publishBtn").addEventListener("click", () => { saveSettings(); publishToGitHub(); });
-  ["cfgRepo","cfgBranch","cfgPath","cfgToken","cfgRemember"].forEach(id =>
+  ["cfgRepo","cfgBranch","cfgPath","cfgToken","cfgRemember","cfgPrefix"].forEach(id =>
     $("#"+id).addEventListener("change", saveSettings));
   loadSettings();
 
