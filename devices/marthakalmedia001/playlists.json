@@ -1,0 +1,64 @@
+{
+  "max_height": 720,
+  "audio_device": "alsa/hdmi:CARD=vc4hdmi0,DEV=0",
+  "schedule": [
+    {
+      "name": "Weekday mornings",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ],
+      "start": "08:00",
+      "end": "17:00",
+      "items": [
+        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4",
+        "https://youtube.com/playlist?list=PLIQvt8492DS0&si=a_UB64r859iip5Ap",
+        "https://youtube.com/playlist?list=PLU2l_e3BJUYE&si=A6bc7MfUszCU4bQL"
+      ],
+      "shuffle": true
+    },
+    {
+      "name": "Weekend all day",
+      "days": [
+        "sat",
+        "sun"
+      ],
+      "start": "08:00",
+      "end": "17:00",
+      "items": [
+        "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4",
+        "https://youtube.com/playlist?list=PLIQvt8492DS0&si=a_UB64r859iip5Ap",
+        "https://youtube.com/playlist?list=PLU2l_e3BJUYE&si=A6bc7MfUszCU4bQL"
+      ],
+      "shuffle": true
+    },
+    {
+      "name": "image test",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "start": "09:00",
+      "end": "17:00",
+      "items": [
+        {
+          "type": "image",
+          "src": "images/image-62-mtqmtbyv.jpg",
+          "duration": 60
+        }
+      ]
+    }
+  ],
+  "default": [
+    "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
+  ],
+  "default_shuffle": true
+}
