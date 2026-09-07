@@ -71,12 +71,27 @@ else
 fi
 
 # ── Clone (or update) the repo ────────────────────────────────
+# A prior interrupted run — or a power cut mid-clone — can leave a .git with
+# broken refs, so "reset --hard origin/main" fails and (under set -e) aborts the
+# whole installer. We try to update in place, and if the repo turns out broken
+# we wipe it and clone fresh instead of giving up. (set -e is ignored inside a
+# function called from an if-condition, so the explicit "|| return 1" guards are
+# what make a failed step fall through to a clean re-clone.)
 section "Fetching the media player from GitHub"
-if [ -d "$REPO_DIR/.git" ]; then
-  git -C "$REPO_DIR" reset --hard origin/main --quiet
-  git -C "$REPO_DIR" pull --quiet
+
+update_repo() {
+  git -C "$REPO_DIR" remote set-url origin "$REPO_URL" 2>/dev/null || true
+  git -C "$REPO_DIR" fetch origin main --quiet || return 1
+  git -C "$REPO_DIR" reset --hard origin/main --quiet || return 1
+}
+
+if [ -d "$REPO_DIR/.git" ] && update_repo; then
   info "Existing repo updated"
 else
+  if [ -e "$REPO_DIR" ]; then
+    warn "No usable repo at $REPO_DIR (missing or broken) — cloning fresh."
+    rm -rf "$REPO_DIR"
+  fi
   git clone --quiet "$REPO_URL" "$REPO_DIR"
   info "Repo cloned to $REPO_DIR"
 fi
