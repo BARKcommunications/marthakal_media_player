@@ -23,8 +23,7 @@
           "duration": 20
         }
       ],
-      "shuffle": true,
-      "image_every": 2
+      "shuffle": true
     },
     {
       "name": "Weekend all day",
@@ -45,5 +44,9 @@
   "default": [
     "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4"
   ],
-  "default_shuffle": true
+  "default_shuffle": true,
+  "display": {
+    "enabled": true,
+    "mode": "auto"
+  }
 }
