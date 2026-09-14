@@ -49,8 +49,18 @@ Pi powers on
 
 ## Using the scheduler
 
-Open **`scheduler.html`** in any browser (double-click it — no server needed). It loads
-the sign's current live schedule automatically.
+Open the scheduler at:
+
+```
+https://barkcommunications.github.io/marthakal_media_player/scheduler.html
+```
+
+It loads the sign's current live schedule automatically.
+
+> Serve it from GitHub Pages rather than opening the file locally — Chrome blocks
+> local `file://` pages from making network requests on many machines, which stops the
+> scheduler loading or publishing. Hosting it also means the client always has the
+> latest version.
 
 1. **Pick the device** — the `Device` box in the header (`001`, `002`, …). It loads that
    sign's schedule. A brand-new number starts from the shared default.
@@ -62,12 +72,10 @@ the sign's current live schedule automatically.
    many seconds it stays on screen.
 4. **Shuffle** — the *⤨ Shuffle* toggle on any block plays its items in a random order,
    re-shuffled each loop. Off by default.
-5. **Img every** — set this to `3` and an image plays after every 3 videos, cycling
-   through that block's images, rather than playing them where they sit in the list.
-   Leave at `0` for list order. Works alongside shuffle: the videos are shuffled, the
-   images stay evenly spaced.
-6. **Set the default** — plays whenever no block matches (e.g. overnight).
-7. **Max quality** — leave at **720p**. See the warning below.
+5. **Set the default** — plays whenever no block matches (e.g. overnight).
+6. **Max quality** — leave at **720p**. See the warning below.
+7. **Screen power** *(optional)* — turn the TV on and off on a schedule over the
+   HDMI cable. See below.
 8. Click **Publish to Pi**. The sign updates within ~2 minutes.
 
 > **Quality warning:** 1080p causes stuttering and dropped videos on a Pi 4 — YouTube
@@ -102,13 +110,11 @@ The token is stored only in that browser. Note its expiry date and renew before 
         "https://www.youtube.com/watch?v=singlevideo",
         { "type": "image", "src": "images/promo.png", "duration": 10 }
       ],
-      "shuffle": true,
-      "image_every": 3
+      "shuffle": true
     }
   ],
   "default": ["https://www.youtube.com/playlist?list=PLdefault"],
-  "default_shuffle": true,
-  "default_image_every": 3
+  "default_shuffle": true
 }
 ```
 
@@ -119,8 +125,54 @@ The token is stored only in that browser. Note its expiry date and renew before 
 - **`start`/`end`** — 24-hour, the Pi's local clock. An end earlier than the start
   (e.g. `22:00`–`02:00`) wraps past midnight.
 - **`shuffle` / `default_shuffle`** — omit or `false` to play in order.
-- **`image_every` / `default_image_every`** — show an image after every N videos
-  instead of playing images where they sit in the list. Omit or `0` for list order.
+- **`display`** — optional TV power schedule (see below).
+
+---
+
+## Screen power (HDMI-CEC)
+
+The Pi can switch the TV on and off over the HDMI cable, so the screen isn't running
+overnight. Set it in the scheduler's **Screen power** panel. Two modes:
+
+**Follow schedule (recommended)** — the screen turns on when the day's first block
+starts and off when its last block ends, staying on through any gaps between blocks.
+Days with no blocks stay off. Nothing to keep in sync:
+
+```json
+"display": { "enabled": true, "mode": "auto" }
+```
+
+**Set times** — fixed on/off times and days, independent of the schedule:
+
+```json
+"display": {
+  "enabled": true,
+  "mode": "manual",
+  "on": "08:00",
+  "off": "17:00",
+  "days": ["mon", "tue", "wed", "thu", "fri"]
+}
+```
+
+The player checks every minute. It sends a command when the state should change, and
+re-sends the current state every 30 minutes so the screen recovers if someone switched
+it off by hand or the TV missed a command. Change that interval by adding
+`"reassert_minutes": 15` to the display block (`0` disables re-asserting).
+
+> Because it re-asserts, deliberately turning the TV off during opening hours won't
+> stick — it'll come back on within 30 minutes. That's usually what you want for
+> signage, but set `reassert_minutes` to `0` if not.
+
+**The TV must have HDMI-CEC enabled in its own settings** — it's usually off by default
+and named by brand: **Bravia Sync** (Sony), **Anynet+** (Samsung), **SimpLink** (LG),
+**Viera Link** (Panasonic), **EasyLink** (Philips).
+
+Test it on the Pi before relying on it:
+```bash
+echo "on 0" | cec-client -s -d 1        # TV should turn on
+echo "standby 0" | cec-client -s -d 1   # TV should go to standby
+```
+If nothing happens, CEC isn't enabled on the TV (or the display doesn't support it).
 
 ---
 
@@ -148,8 +200,8 @@ Until you publish, the new sign plays the shared `playlists.json` from the repo 
 
 1. Auto-detects the username and hostname
 2. Installs `git`, `mpv`, `python3`, `pip`, video libraries
-3. Installs **yt-dlp (pre-release)** and **Deno** (required — YouTube needs a JS runtime
-   to extract streams)
+3. Installs **yt-dlp (pre-release)**, **Deno** (required — YouTube needs a JS runtime
+   to extract streams) and **cec-utils** (for TV power control)
 4. Clones this repo to `~/marthakal_media_player`
 5. Frees `tty1` so the player can own the screen (disables the login console there)
 6. Creates the `mediaplayer` service and the `mediaplayer-update` timer
@@ -254,6 +306,12 @@ Usually one of two things:
 **"Nothing to play"**
 The active block has no valid items, or there's no internet. Check `ping youtube.com`
 and confirm the playlists are public or unlisted (private playlists won't work).
+
+**TV doesn't turn on/off**
+CEC must be enabled on the TV itself (Bravia Sync / Anynet+ / SimpLink). Test with
+`echo "on 0" | cec-client -s -d 1`. Some cheap commercial displays don't support CEC
+at all. Note some TVs also power on when they detect an HDMI signal, independently of
+this setting.
 
 **A block never plays**
 Blocks match top to bottom, first match wins. An earlier block covering the same days

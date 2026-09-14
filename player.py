@@ -18,6 +18,7 @@ import random
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 # ─── Paths & configuration ────────────────────────────────────────────────────
@@ -65,6 +66,114 @@ DEFAULT_IMAGE_SECONDS = 10
 AUDIO_DEVICE = ""
 
 DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+# ─── TV power control (HDMI-CEC) ──────────────────────────────────────────────
+# Turns the display on/off over the HDMI cable, so the screen isn't running
+# outside opening hours. Configured under "display" in playlists.json:
+#   "display": { "enabled": true, "on": "08:00", "off": "17:00",
+#                "days": ["mon","tue","wed","thu","fri"] }
+# Requires cec-utils on the Pi and CEC enabled on the TV
+# (Sony calls it "Bravia Sync", Samsung "Anynet+", LG "SimpLink").
+
+CEC_POLL_SECONDS = 60
+# Re-send the current desired state periodically, not just on change, so the
+# screen recovers if someone switched it off by hand or the TV missed a command
+# after a power blip. Override with "reassert_minutes" in the display config.
+CEC_REASSERT_MINUTES = 30
+_cec_last_state = None          # None = unknown, True = on, False = standby
+_cec_last_sent = 0.0            # monotonic time of the last command sent
+
+
+def cec_send(command: str) -> bool:
+    """Send a raw CEC command (e.g. 'on 0' / 'standby 0'). True if it ran."""
+    try:
+        r = subprocess.run(
+            ["cec-client", "-s", "-d", "1"],
+            input=command, capture_output=True, text=True, timeout=20,
+        )
+        return r.returncode == 0
+    except FileNotFoundError:
+        log.warning("cec-utils not installed — TV power control disabled.")
+        return False
+    except subprocess.TimeoutExpired:
+        log.warning("CEC command timed out.")
+        return False
+    except Exception as exc:
+        log.warning(f"CEC command failed: {exc}")
+        return False
+
+
+def auto_window(cfg: dict, now: datetime.datetime):
+    """
+    Derive the TV on/off window from the schedule blocks for today:
+    on at the earliest block start, off at the latest block end. Staying on
+    through any gaps is deliberate — better than flicking the TV off and on
+    between blocks. Returns (start_min, end_min) or None if nothing today.
+    """
+    day = DAY_KEYS[now.weekday()]
+    starts, ends = [], []
+    for block in cfg.get("schedule", []):
+        if day not in block.get("days", []):
+            continue
+        s = _parse_hhmm(block.get("start", "00:00"))
+        e = _parse_hhmm(block.get("end", "23:59"))
+        if e <= s:               # wraps past midnight — treat as running to end of day
+            e = 1439
+        starts.append(s); ends.append(e)
+    if not starts:
+        return None
+    return (min(starts), max(ends))
+
+
+def tv_should_be_on(disp: dict, now: datetime.datetime, cfg: dict = None) -> bool:
+    """Is the display scheduled to be on right now?"""
+    mins = now.hour * 60 + now.minute
+
+    # Auto mode: follow the schedule blocks instead of fixed times.
+    if disp.get("mode") == "auto":
+        win = auto_window(cfg or {}, now)
+        if not win:
+            return False          # no blocks today — keep the screen off
+        return win[0] <= mins < win[1]
+
+    days = disp.get("days") or DAY_KEYS          # empty/missing = every day
+    if DAY_KEYS[now.weekday()] not in days:
+        return False
+    start = _parse_hhmm(disp.get("on", "00:00"))
+    end = _parse_hhmm(disp.get("off", "23:59"))
+    if start <= end:
+        return start <= mins < end
+    return mins >= start or mins < end           # wraps past midnight
+
+
+def cec_worker():
+    """
+    Background loop: keeps the TV's power state matching the schedule.
+    Only sends a CEC command when the desired state changes, so the TV isn't
+    spammed every minute (and a manual power-on isn't fought mid-window).
+    """
+    global _cec_last_state, _cec_last_sent
+    while True:
+        try:
+            cfg = load_config()
+            disp = cfg.get("display") or {}
+            if disp.get("enabled"):
+                want_on = tv_should_be_on(disp, datetime.datetime.now(), cfg)
+                changed = want_on != _cec_last_state
+                every = _safe_int(disp.get("reassert_minutes"), CEC_REASSERT_MINUTES)
+                due = every > 0 and (time.monotonic() - _cec_last_sent) >= every * 60
+                if changed or due:
+                    if cec_send("on 0" if want_on else "standby 0"):
+                        why = "scheduled" if changed else "re-assert"
+                        log.info(f"TV {'on' if want_on else 'standby'} ({why}).")
+                        _cec_last_state = want_on
+                        _cec_last_sent = time.monotonic()
+            else:
+                _cec_last_state = None           # disabled — forget the state
+        except Exception as exc:
+            log.warning(f"TV power check failed: {exc}")
+        time.sleep(CEC_POLL_SECONDS)
+
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -128,20 +237,16 @@ def _block_active(block: dict, now: datetime.datetime) -> bool:
 
 
 def resolve_active_source(cfg: dict, now: datetime.datetime):
-    """Decide what should play now.
-    Returns (source_id, items_list, shuffle, image_every)."""
+    """Decide what should play now. Returns (source_id, items_list, shuffle)."""
     for i, block in enumerate(cfg.get("schedule", [])):
         if _block_active(block, now):
             name = block.get("name", f"block-{i}")
-            return (f"schedule:{i}:{name}", block.get("items", []),
-                    bool(block.get("shuffle", False)),
-                    _safe_int(block.get("image_every"), 0))
+            return (f"schedule:{i}:{name}", block.get("items", []), bool(block.get("shuffle", False)))
     if "default" in cfg:
-        return ("default", cfg.get("default", []), bool(cfg.get("default_shuffle", False)),
-                _safe_int(cfg.get("default_image_every"), 0))
+        return ("default", cfg.get("default", []), bool(cfg.get("default_shuffle", False)))
     if "playlists" in cfg:                # backward compatibility
-        return ("default", cfg.get("playlists", []), bool(cfg.get("shuffle", False)), 0)
-    return ("default", [], False, 0)
+        return ("default", cfg.get("playlists", []), bool(cfg.get("shuffle", False)))
+    return ("default", [], False)
 
 
 # ─── yt-dlp helpers ───────────────────────────────────────────────────────────
@@ -217,34 +322,6 @@ def expand_items(items: list) -> list:
             else:
                 entries.append({"kind": "video", "url": s})
     return entries
-
-
-_image_cursor = 0    # keeps the image rotation moving across queue rebuilds
-
-
-def interleave_images(entries: list, every: int) -> list:
-    """
-    Space images out through the videos instead of playing them where they sit
-    in the config: show one image after every `every` videos, taking each image
-    in turn. With more images than slots in a cycle, the rotation picks up where
-    it left off next time round, so they all get screen time eventually.
-
-    `every` of 0 (or a queue with no images, or no videos) leaves the order alone.
-    """
-    global _image_cursor
-    if every < 1:
-        return entries
-    videos = [e for e in entries if e.get("kind") != "image"]
-    images = [e for e in entries if e.get("kind") == "image"]
-    if not videos or not images:
-        return entries
-    out = []
-    for i, video in enumerate(videos, 1):
-        out.append(video)
-        if i % every == 0:
-            out.append(images[_image_cursor % len(images)])
-            _image_cursor += 1
-    return out
 
 
 def resolve_stream_url(page_url: str):
@@ -495,6 +572,12 @@ def run() -> None:
         sys.exit(1)
     show_splash(mpv)
 
+    # TV power scheduling (HDMI-CEC), if configured. Runs independently of
+    # playback so the screen powers on/off on time regardless of what's playing.
+    if (_startcfg.get("display") or {}).get("enabled"):
+        threading.Thread(target=cec_worker, daemon=True).start()
+        log.info("TV power scheduling enabled (HDMI-CEC).")
+
     current_source = None
     queue = []
     index = 0
@@ -502,8 +585,7 @@ def run() -> None:
     try:
         while True:
             cfg = load_config()
-            source_id, items, shuffle, image_every = resolve_active_source(
-                cfg, datetime.datetime.now())
+            source_id, items, shuffle = resolve_active_source(cfg, datetime.datetime.now())
 
             if source_id != current_source or index >= len(queue):
                 if source_id != current_source:
@@ -512,10 +594,6 @@ def run() -> None:
                 if shuffle:
                     random.shuffle(queue)          # fresh random order each cycle
                     log.info(f"Shuffled {len(queue)} item(s).")
-                if image_every:
-                    queue = interleave_images(queue, image_every)
-                    log.info(f"Images spaced every {image_every} video(s) — "
-                             f"{len(queue)} item(s) in the cycle.")
                 index = 0
                 current_source = source_id
                 if not queue:

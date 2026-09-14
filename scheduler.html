@@ -350,18 +350,6 @@
   .remember-row input { width: 16px; height: 16px; accent-color: var(--amber); }
   button.busy { opacity: 0.7; pointer-events: none; }
 
-  .every-field {
-    display: flex; align-items: center; gap: 5px; white-space: nowrap;
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--faint);
-  }
-  .every-field input {
-    width: 46px; font-family: var(--mono); font-size: 12.5px; color: var(--text);
-    background: #14171f; border: 1px solid var(--line); border-radius: 6px;
-    padding: 6px 7px; text-align: right;
-  }
-  .every-field input:focus { outline: none; border-color: var(--focus); }
-
   .shuffle-btn {
     font-family: var(--mono); font-size: 11px; font-weight: 600;
     letter-spacing: 0.04em; color: var(--muted);
@@ -375,7 +363,6 @@
     display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
   }
   .default-head .hint { margin-top: 0; }
-  .default-head-controls { display: flex; align-items: center; gap: 10px; }
   .footnote {
     max-width: 1400px; margin: 0 auto; padding: 0 28px 40px;
     color: var(--faint); font-size: 12.5px;
@@ -461,20 +448,50 @@
       <div class="default-panel">
         <div class="default-head">
           <p class="hint">When no block matches the current day and time, these play on loop as the fallback.</p>
-          <div class="default-head-controls">
-            <label class="every-field"
-                   title="Show an image after this many videos, cycling through the images. 0 keeps them in list order.">
-              <span>img every</span>
-              <input type="number" id="defaultImageEvery" min="0" step="1" value="0">
-            </label>
-            <button class="shuffle-btn" id="defaultShuffleBtn" aria-pressed="false"
-                    title="Play the default items in random order">⤨ Shuffle</button>
-          </div>
+          <button class="shuffle-btn" id="defaultShuffleBtn" aria-pressed="false"
+                  title="Play the default items in random order">⤨ Shuffle</button>
         </div>
         <div class="items" id="defaultItems"></div>
         <div class="block-actions">
           <button class="tiny" id="addDefaultItem">+ Add item</button>
           <button class="tiny" id="addDefaultImage">+ Add image</button>
+        </div>
+      </div>
+
+      <p class="section-label" style="margin-top:32px;">Screen power</p>
+      <div class="default-panel">
+        <div class="default-head">
+          <p class="hint">
+            Turns the TV on and off over the HDMI cable, so it isn't running out of
+            hours. The TV must have HDMI-CEC switched on — Sony calls it
+            <strong>Bravia Sync</strong>, Samsung <strong>Anynet+</strong>,
+            LG <strong>SimpLink</strong>.
+          </p>
+          <button class="shuffle-btn" id="displayEnabledBtn" aria-pressed="false"
+                  title="Turn scheduled screen power on or off">⏻ Enabled</button>
+        </div>
+        <div id="displayRows" hidden>
+          <div class="row">
+            <span class="field-label">Mode</span>
+            <button class="shuffle-btn" id="displayModeAuto" aria-pressed="true">Follow schedule</button>
+            <button class="shuffle-btn" id="displayModeManual" aria-pressed="false">Set times</button>
+          </div>
+          <p class="hint" id="displayAutoHint" style="margin:10px 0 0;">
+            The screen turns on when the day's first block starts and off when its last
+            block ends, staying on through any gaps. Days with no blocks stay off.
+          </p>
+          <div class="row" id="displayDaysRow">
+            <span class="field-label">Days</span>
+            <div class="days" id="displayDays"></div>
+          </div>
+          <div class="row" id="displayTimesRow">
+            <span class="field-label">On at</span>
+            <input type="time" id="displayOn" value="08:00">
+            <span class="time-sep">→</span>
+            <span class="field-label">Off at</span>
+            <input type="time" id="displayOff" value="17:00">
+            <span class="wrap-note" id="displayWrapNote" hidden>wraps past midnight</span>
+          </div>
         </div>
       </div>
     </section>
@@ -510,10 +527,11 @@
   let state = {
     maxHeight: 720,        // playback quality cap
     audioDevice: "",       // e.g. alsa/hdmi:CARD=vc4hdmi0,DEV=0 (preserved on import)
-    schedule: [],          // { name, days:[], start, end, items:[], shuffle, imageEvery }
+    schedule: [],          // { name, days:[], start, end, items:[], shuffle:false }
     default: [""],
     defaultShuffle: false,
-    defaultImageEvery: 0,  // 0 = images play where they sit in the list
+    display: { enabled:false, mode:"auto", on:"08:00", off:"17:00",
+               days:["mon","tue","wed","thu","fri"] },
   };
 
   // ── Helpers ────────────────────────────────────────────
@@ -605,19 +623,9 @@
       const nameInput = el("input", { type: "text", class: "block-name",
         value: block.name || "", placeholder: "Block name (e.g. Weekday mornings)",
         oninput: (e) => { block.name = e.target.value; scheduleRenderGrid(); } });
-      // "img every N videos" — spaces images out instead of playing them in list order
-      const everyField = el("label", { class: "every-field",
-        title: "Show an image after this many videos, cycling through this block's images. 0 keeps them in list order." },
-        el("span", {}, "img every"),
-        el("input", { type: "number", min: "0", step: "1",
-          value: String(block.imageEvery || 0),
-          oninput: (e) => { block.imageEvery = Math.max(0, parseInt(e.target.value, 10) || 0); } })
-      );
-
       card.append(el("div", { class: "block-head" },
         el("span", { class: "block-index" }, String(i+1).padStart(2,"0")),
         nameInput,
-        everyField,
         el("button", { class: "shuffle-btn", "aria-pressed": String(!!block.shuffle),
           title: "Play this block's items in random order",
           onclick: () => { block.shuffle = !block.shuffle; render(); } }, "⤨ Shuffle"),
@@ -672,8 +680,34 @@
     renderItems($("#defaultItems"), state.default, () => render());
     const btn = $("#defaultShuffleBtn");
     if (btn) btn.setAttribute("aria-pressed", String(!!state.defaultShuffle));
-    const every = $("#defaultImageEvery");
-    if (every && document.activeElement !== every) every.value = String(state.defaultImageEvery || 0);
+  }
+
+  function renderDisplay() {
+    const d = state.display;
+    const auto = d.mode !== "manual";
+    $("#displayEnabledBtn").setAttribute("aria-pressed", String(!!d.enabled));
+    $("#displayRows").hidden = !d.enabled;
+    $("#displayModeAuto").setAttribute("aria-pressed", String(auto));
+    $("#displayModeManual").setAttribute("aria-pressed", String(!auto));
+    $("#displayAutoHint").hidden = !auto;
+    $("#displayDaysRow").hidden = auto;
+    $("#displayTimesRow").hidden = auto;
+    $("#displayOn").value = d.on || "08:00";
+    $("#displayOff").value = d.off || "17:00";
+    $("#displayWrapNote").hidden = auto || !(toMin(d.off) <= toMin(d.on));
+    const wrap = $("#displayDays"); wrap.innerHTML = "";
+    DAYS.forEach(day => {
+      const on = (d.days || []).includes(day);
+      wrap.append(el("button", {
+        class: "day-btn", "aria-pressed": String(on), "aria-label": day,
+        onclick: () => {
+          d.days = d.days || [];
+          const at = d.days.indexOf(day);
+          if (at >= 0) d.days.splice(at,1); else d.days.push(day);
+          renderDisplay();
+        }
+      }, DAY_LABELS[day]));
+    });
   }
 
   // ── Week grid preview ──────────────────────────────────
@@ -753,6 +787,7 @@
   function render() {
     renderBlocks();
     renderDefault();
+    renderDisplay();
     renderGrid();
   }
 
@@ -782,12 +817,20 @@
         items: cleanItems(b.items),
       };
       if (b.shuffle) block.shuffle = true;
-      if (b.imageEvery > 0) block.image_every = b.imageEvery;
       out.schedule.push(block);
     });
     out.default = cleanItems(state.default);
     if (state.defaultShuffle) out.default_shuffle = true;
-    if (state.defaultImageEvery > 0) out.default_image_every = state.defaultImageEvery;
+    if (state.display.enabled) {
+      const auto = state.display.mode !== "manual";
+      out.display = auto
+        ? { enabled: true, mode: "auto" }
+        : { enabled: true,
+            mode: "manual",
+            on: state.display.on || "08:00",
+            off: state.display.off || "17:00",
+            days: DAYS.filter(d => (state.display.days || []).includes(d)) };
+    }
     return out;
   }
 
@@ -965,7 +1008,6 @@
         end: b.end || "17:00",
         items: Array.isArray(b.items) && b.items.length ? b.items.slice() : [""],
         shuffle: !!b.shuffle,
-        imageEvery: Math.max(0, parseInt(b.image_every, 10) || 0),
       }));
     }
     if (Array.isArray(data.default) && data.default.length) {
@@ -976,7 +1018,16 @@
       state.default = [""];
     }
     state.defaultShuffle = !!data.default_shuffle;
-    state.defaultImageEvery = Math.max(0, parseInt(data.default_image_every, 10) || 0);
+    const dp = data.display || {};
+    state.display = {
+      enabled: !!dp.enabled,
+      mode: dp.mode === "manual" ? "manual" : "auto",
+      on: dp.on || "08:00",
+      off: dp.off || "17:00",
+      days: Array.isArray(dp.days) && dp.days.length
+              ? dp.days.filter(d => DAYS.includes(d))
+              : ["mon","tue","wed","thu","fri"],
+    };
     render();
   }
 
@@ -1071,7 +1122,7 @@
   $("#addBlock").addEventListener("click", () => {
     state.schedule.push({
       name: "", days: ["mon","tue","wed","thu","fri"],
-      start: "09:00", end: "17:00", items: [""], shuffle: false, imageEvery: 0,
+      start: "09:00", end: "17:00", items: [""], shuffle: false,
     });
     render();
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
@@ -1079,10 +1130,14 @@
   $("#addDefaultItem").addEventListener("click", () => { state.default.push(""); render(); });
   $("#addDefaultImage").addEventListener("click", () => pickImage(state.default));
   $("#defaultShuffleBtn").addEventListener("click", () => { state.defaultShuffle = !state.defaultShuffle; render(); });
-  $("#defaultImageEvery").addEventListener("input", (e) => {
-    state.defaultImageEvery = Math.max(0, parseInt(e.target.value, 10) || 0);
-  });
   $("#deviceNum").addEventListener("change", reloadForDevice);
+  $("#displayEnabledBtn").addEventListener("click", () => {
+    state.display.enabled = !state.display.enabled; renderDisplay();
+  });
+  $("#displayModeAuto").addEventListener("click", () => { state.display.mode="auto"; renderDisplay(); });
+  $("#displayModeManual").addEventListener("click", () => { state.display.mode="manual"; renderDisplay(); });
+  $("#displayOn").addEventListener("input", (e) => { state.display.on = e.target.value; renderDisplay(); });
+  $("#displayOff").addEventListener("input", (e) => { state.display.off = e.target.value; renderDisplay(); });
   $("#imageInput").addEventListener("change", (e) => {
     if (e.target.files[0]) handleImagePicked(e.target.files[0]);
     e.target.value = "";
@@ -1110,7 +1165,7 @@
     if (!loaded) {
       state.schedule.push({
         name: "Weekday mornings", days: ["mon","tue","wed","thu","fri"],
-        start: "09:00", end: "12:00", items: [""], shuffle: false, imageEvery: 0,
+        start: "09:00", end: "12:00", items: [""], shuffle: false,
       });
       render();
     }
