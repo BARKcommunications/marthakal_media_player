@@ -23,7 +23,8 @@
           "duration": 20
         }
       ],
-      "shuffle": true
+      "shuffle": true,
+      "image_every": 2
     },
     {
       "name": "Weekend all day",
