@@ -237,16 +237,20 @@ def _block_active(block: dict, now: datetime.datetime) -> bool:
 
 
 def resolve_active_source(cfg: dict, now: datetime.datetime):
-    """Decide what should play now. Returns (source_id, items_list, shuffle)."""
+    """Decide what should play now. Returns (source_id, items, shuffle, image_every)."""
     for i, block in enumerate(cfg.get("schedule", [])):
         if _block_active(block, now):
             name = block.get("name", f"block-{i}")
-            return (f"schedule:{i}:{name}", block.get("items", []), bool(block.get("shuffle", False)))
+            return (f"schedule:{i}:{name}", block.get("items", []),
+                    bool(block.get("shuffle", False)),
+                    _safe_int(block.get("image_every"), 0))
     if "default" in cfg:
-        return ("default", cfg.get("default", []), bool(cfg.get("default_shuffle", False)))
+        return ("default", cfg.get("default", []),
+                bool(cfg.get("default_shuffle", False)),
+                _safe_int(cfg.get("default_image_every"), 0))
     if "playlists" in cfg:                # backward compatibility
-        return ("default", cfg.get("playlists", []), bool(cfg.get("shuffle", False)))
-    return ("default", [], False)
+        return ("default", cfg.get("playlists", []), bool(cfg.get("shuffle", False)), 0)
+    return ("default", [], False, 0)
 
 
 # ─── yt-dlp helpers ───────────────────────────────────────────────────────────
@@ -322,6 +326,29 @@ def expand_items(items: list) -> list:
             else:
                 entries.append({"kind": "video", "url": s})
     return entries
+
+
+def interleave_images(entries: list, every: int) -> list:
+    """
+    Space images through the queue instead of playing them in list order:
+    show one image after every `every` videos, cycling through the images.
+    every <= 0 (or no images/videos) leaves the queue untouched.
+    """
+    if every <= 0:
+        return entries
+    videos = [e for e in entries if e.get("kind") == "video"]
+    images = [e for e in entries if e.get("kind") == "image"]
+    if not images or not videos:
+        return entries
+    out, img_i = [], 0
+    for i, vid in enumerate(videos, start=1):
+        out.append(vid)
+        if i % every == 0:
+            out.append(images[img_i % len(images)])
+            img_i += 1
+    if img_i == 0:                 # fewer videos than the interval — show one anyway
+        out.append(images[0])
+    return out
 
 
 def resolve_stream_url(page_url: str):
@@ -585,7 +612,7 @@ def run() -> None:
     try:
         while True:
             cfg = load_config()
-            source_id, items, shuffle = resolve_active_source(cfg, datetime.datetime.now())
+            source_id, items, shuffle, image_every = resolve_active_source(cfg, datetime.datetime.now())
 
             if source_id != current_source or index >= len(queue):
                 if source_id != current_source:
@@ -594,6 +621,11 @@ def run() -> None:
                 if shuffle:
                     random.shuffle(queue)          # fresh random order each cycle
                     log.info(f"Shuffled {len(queue)} item(s).")
+                if image_every > 0:
+                    before = len(queue)
+                    queue = interleave_images(queue, image_every)
+                    log.info(f"Spacing images every {image_every} video(s) "
+                             f"({before} -> {len(queue)} items).")
                 index = 0
                 current_source = source_id
                 if not queue:

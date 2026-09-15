@@ -350,6 +350,19 @@
   .remember-row input { width: 16px; height: 16px; accent-color: var(--amber); }
   button.busy { opacity: 0.7; pointer-events: none; }
 
+  .every-field {
+    display: flex; align-items: center; gap: 5px; white-space: nowrap;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .every-field input {
+    width: 46px; font-family: var(--mono); font-size: 12.5px; color: var(--text);
+    background: #14171f; border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 7px; text-align: right;
+  }
+  .every-field input:focus { outline: none; border-color: var(--focus); }
+  .default-head-controls { display: flex; align-items: center; gap: 10px; }
+
   .shuffle-btn {
     font-family: var(--mono); font-size: 11px; font-weight: 600;
     letter-spacing: 0.04em; color: var(--muted);
@@ -448,8 +461,15 @@
       <div class="default-panel">
         <div class="default-head">
           <p class="hint">When no block matches the current day and time, these play on loop as the fallback.</p>
-          <button class="shuffle-btn" id="defaultShuffleBtn" aria-pressed="false"
-                  title="Play the default items in random order">⤨ Shuffle</button>
+          <div class="default-head-controls">
+            <label class="every-field"
+                   title="Show an image after this many videos, cycling through the images. 0 keeps them in list order.">
+              <span>img every</span>
+              <input type="number" id="defaultImageEvery" min="0" step="1" value="0">
+            </label>
+            <button class="shuffle-btn" id="defaultShuffleBtn" aria-pressed="false"
+                    title="Play the default items in random order">⤨ Shuffle</button>
+          </div>
         </div>
         <div class="items" id="defaultItems"></div>
         <div class="block-actions">
@@ -527,9 +547,10 @@
   let state = {
     maxHeight: 720,        // playback quality cap
     audioDevice: "",       // e.g. alsa/hdmi:CARD=vc4hdmi0,DEV=0 (preserved on import)
-    schedule: [],          // { name, days:[], start, end, items:[], shuffle:false }
+    schedule: [],          // { name, days:[], start, end, items:[], shuffle, imageEvery }
     default: [""],
     defaultShuffle: false,
+    defaultImageEvery: 0,
     display: { enabled:false, mode:"auto", on:"08:00", off:"17:00",
                days:["mon","tue","wed","thu","fri"] },
   };
@@ -623,9 +644,19 @@
       const nameInput = el("input", { type: "text", class: "block-name",
         value: block.name || "", placeholder: "Block name (e.g. Weekday mornings)",
         oninput: (e) => { block.name = e.target.value; scheduleRenderGrid(); } });
+      // "img every N videos" — spaces images out instead of playing them in list order
+      const everyField = el("label", { class: "every-field",
+        title: "Show an image after this many videos, cycling through this block's images. 0 keeps them in list order." },
+        el("span", {}, "img every"),
+        el("input", { type: "number", min: "0", step: "1",
+          value: String(block.imageEvery || 0),
+          oninput: (e) => { block.imageEvery = Math.max(0, parseInt(e.target.value, 10) || 0); } })
+      );
+
       card.append(el("div", { class: "block-head" },
         el("span", { class: "block-index" }, String(i+1).padStart(2,"0")),
         nameInput,
+        everyField,
         el("button", { class: "shuffle-btn", "aria-pressed": String(!!block.shuffle),
           title: "Play this block's items in random order",
           onclick: () => { block.shuffle = !block.shuffle; render(); } }, "⤨ Shuffle"),
@@ -680,6 +711,8 @@
     renderItems($("#defaultItems"), state.default, () => render());
     const btn = $("#defaultShuffleBtn");
     if (btn) btn.setAttribute("aria-pressed", String(!!state.defaultShuffle));
+    const every = $("#defaultImageEvery");
+    if (every && document.activeElement !== every) every.value = String(state.defaultImageEvery || 0);
   }
 
   function renderDisplay() {
@@ -817,10 +850,12 @@
         items: cleanItems(b.items),
       };
       if (b.shuffle) block.shuffle = true;
+      if (b.imageEvery > 0) block.image_every = b.imageEvery;
       out.schedule.push(block);
     });
     out.default = cleanItems(state.default);
     if (state.defaultShuffle) out.default_shuffle = true;
+    if (state.defaultImageEvery > 0) out.default_image_every = state.defaultImageEvery;
     if (state.display.enabled) {
       const auto = state.display.mode !== "manual";
       out.display = auto
@@ -1008,6 +1043,7 @@
         end: b.end || "17:00",
         items: Array.isArray(b.items) && b.items.length ? b.items.slice() : [""],
         shuffle: !!b.shuffle,
+        imageEvery: Math.max(0, parseInt(b.image_every, 10) || 0),
       }));
     }
     if (Array.isArray(data.default) && data.default.length) {
@@ -1018,6 +1054,7 @@
       state.default = [""];
     }
     state.defaultShuffle = !!data.default_shuffle;
+    state.defaultImageEvery = Math.max(0, parseInt(data.default_image_every, 10) || 0);
     const dp = data.display || {};
     state.display = {
       enabled: !!dp.enabled,
@@ -1122,7 +1159,7 @@
   $("#addBlock").addEventListener("click", () => {
     state.schedule.push({
       name: "", days: ["mon","tue","wed","thu","fri"],
-      start: "09:00", end: "17:00", items: [""], shuffle: false,
+      start: "09:00", end: "17:00", items: [""], shuffle: false, imageEvery: 0,
     });
     render();
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
@@ -1131,6 +1168,9 @@
   $("#addDefaultImage").addEventListener("click", () => pickImage(state.default));
   $("#defaultShuffleBtn").addEventListener("click", () => { state.defaultShuffle = !state.defaultShuffle; render(); });
   $("#deviceNum").addEventListener("change", reloadForDevice);
+  $("#defaultImageEvery").addEventListener("input", (e) => {
+    state.defaultImageEvery = Math.max(0, parseInt(e.target.value, 10) || 0);
+  });
   $("#displayEnabledBtn").addEventListener("click", () => {
     state.display.enabled = !state.display.enabled; renderDisplay();
   });
@@ -1165,7 +1205,7 @@
     if (!loaded) {
       state.schedule.push({
         name: "Weekday mornings", days: ["mon","tue","wed","thu","fri"],
-        start: "09:00", end: "12:00", items: [""], shuffle: false,
+        start: "09:00", end: "12:00", items: [""], shuffle: false, imageEvery: 0,
       });
       render();
     }

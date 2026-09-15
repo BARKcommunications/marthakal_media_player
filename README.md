@@ -72,11 +72,14 @@ It loads the sign's current live schedule automatically.
    many seconds it stays on screen.
 4. **Shuffle** — the *⤨ Shuffle* toggle on any block plays its items in a random order,
    re-shuffled each loop. Off by default.
-5. **Set the default** — plays whenever no block matches (e.g. overnight).
-6. **Max quality** — leave at **720p**. See the warning below.
-7. **Screen power** *(optional)* — turn the TV on and off on a schedule over the
+5. **img every N** — the number box on each block (and the default). Set it to spread
+   images through the rotation instead of playing them in list order: an image is shown
+   after every N videos, cycling through that block's images. `0` keeps list order.
+6. **Set the default** — plays whenever no block matches (e.g. overnight).
+7. **Max quality** — leave at **720p**. See the warning below.
+8. **Screen power** *(optional)* — turn the TV on and off on a schedule over the
    HDMI cable. See below.
-8. Click **Publish to Pi**. The sign updates within ~2 minutes.
+9. Click **Publish to Pi**. The sign updates within ~2 minutes.
 
 > **Quality warning:** 1080p causes stuttering and dropped videos on a Pi 4 — YouTube
 > serves VP9 at that resolution, which the Pi can't decode in hardware. **Use 720p.**
@@ -125,6 +128,9 @@ The token is stored only in that browser. Note its expiry date and renew before 
 - **`start`/`end`** — 24-hour, the Pi's local clock. An end earlier than the start
   (e.g. `22:00`–`02:00`) wraps past midnight.
 - **`shuffle` / `default_shuffle`** — omit or `false` to play in order.
+- **`image_every` / `default_image_every`** — show an image after every N videos,
+  cycling through the images. Omit or `0` to play items in list order. Applied after
+  shuffling, so images stay evenly spread rather than randomly clumped.
 - **`display`** — optional TV power schedule (see below).
 
 ---
