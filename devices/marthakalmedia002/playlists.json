@@ -21,7 +21,8 @@
           "type": "image",
           "src": "images/visitng-services-sep-nov-mu0tqbdf.jpg",
           "duration": 20
-        }
+        },
+        "https://youtube.com/playlist?list=PLAy8bBx3u8J4&si=z2NFCS_7obKqfGVx"
       ],
       "shuffle": true,
       "image_every": 2
@@ -37,7 +38,8 @@
       "items": [
         "https://www.youtube.com/playlist?list=PL5gDC9r8qtpJhUivca4Q8SFTDsLgpJlT4",
         "https://youtube.com/playlist?list=PLIQvt8492DS0&si=a_UB64r859iip5Ap",
-        "https://youtube.com/playlist?list=PLU2l_e3BJUYE&si=A6bc7MfUszCU4bQL"
+        "https://youtube.com/playlist?list=PLU2l_e3BJUYE&si=A6bc7MfUszCU4bQL",
+        "https://youtube.com/playlist?list=PLAy8bBx3u8J4&si=z2NFCS_7obKqfGVx"
       ],
       "shuffle": true
     }
